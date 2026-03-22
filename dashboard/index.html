@@ -1336,6 +1336,7 @@ let eventLogOpen = false;
 let evFilter = 'all';
 let peersOpen = true;
 let micLevelRafId = null;
+const _txMap=new Map(); // devId → {timerId, loopId}
 
 const S = {
   devices:{}, links:{}, nextId:1,
@@ -1403,44 +1404,7 @@ function getClientSession(){
   S.myClientId=clientId; S.myHostname=hostname;
   return {clientId,hostname};
 }
-function addEventLog(type,msg){
-  S.eventLog.unshift({type,msg,ts:new Date().toLocaleTimeString()});
-  S.eventLog=S.eventLog.slice(0,50);
-  renderEventLog();
-}
-function renderEventLog(){
-  const list=document.getElementById('elog-list'); if(!list) return;
-  const items=S.eventLog.length?S.eventLog:[{type:'scan',msg:'Waiting for field activity…',ts:new Date().toLocaleTimeString()}];
-  list.innerHTML=items.map(item=>`<div class="elog-item"><span class="elog-tag ${item.type}">${item.type.toUpperCase()}</span><div class="elog-msg">${esc(item.ts)} · ${esc(item.msg)}</div></div>`).join('');
-  const count=document.getElementById('elog-count'); if(count) count.textContent=String(S.eventLog.length);
-}
-function renderPeersPanel(){
-  const peers=Object.values(S.peers||{});
-  const list=document.getElementById('peer-list'); const count=document.getElementById('peer-count');
-  if(count) count.textContent=String(peers.length);
-  if(!list) return;
-  if(!peers.length){list.innerHTML='<div class="peer-empty">No peers connected yet.</div>';return;}
-  list.innerHTML=peers.map(peer=>`<div class="peer-row">
-      <div class="peer-dot ${peer.status||'offline'}"></div>
-      <div class="peer-meta">
-        <div class="peer-name">${esc(peer.hostname||peer.clientId)}</div>
-        <div class="peer-sub">${esc(peer.ip||'unknown')} · ${esc(peer.walkie_id||'no walkie')} · ${typeof peer.freq==='number'?peer.freq.toFixed(3):(peer.freq||'—')} MHz</div>
-      </div>
-      <div class="peer-actions">
-        <button class="peer-btn" title="Future admin action">Kick</button>
-        <button class="peer-btn" title="Future direct message">PM</button>
-      </div>
-    </div>`).join('');
-}
 let topologySyncTimer=null, heartbeatTimer=null;
-function scheduleTopologySync(){
-  clearTimeout(topologySyncTimer);
-  topologySyncTimer=setTimeout(syncServerTopology,700);
-}
-function syncServerTopology(){
-  if(!S.socketConnected||!S.socket) return;
-  S.socket.emit('topology_update',{clientId:S.myClientId,topology:{devices:S.devices,links:S.links,nextId:S.nextId}});
-}
 async function fetchWhoAmI(){
   try{
     const res=await fetch(serverBase()+'/api/whoami');
@@ -1448,61 +1412,6 @@ async function fetchWhoAmI(){
     return await res.json();
   }catch{return null;}
 }
-function ownedWalkie(){
-  return Object.values(S.devices).find(d=>d.typeId==='walkie'&&d.ownerId===S.myClientId)||null;
-}
-function peerWalkieByClient(clientId){
-  return Object.values(S.devices).find(d=>d.typeId==='walkie'&&d.ownerId===clientId)||null;
-}
-function ensureOwnedWalkie(){
-  let dev=ownedWalkie();
-  if(dev){S.myWalkieId=dev.id;return dev;}
-  const pad=140;
-  const maxX=Math.max(pad,field.clientWidth-160), maxY=Math.max(pad,field.clientHeight-180);
-  const id=addDevice('walkie',pad+Math.random()*(maxX-pad),pad+Math.random()*(maxY-pad),{
-    label:S.myHostname||guessLocalHostname(),
-    status:'online',
-    ownerId:S.myClientId,
-    isOwned:true,
-    notes:'Auto-registered walkie-talkie for this browser tab.',
-  });
-  S.myWalkieId=id;
-  const node=document.getElementById('nd-'+id); if(node) node.classList.add('you');
-  persist();
-  return S.devices[id];
-}
-function upsertPeerWalkie(peer){
-  if(!peer?.clientId) return;
-  S.peers[peer.clientId]=peer;
-  renderPeersPanel();
-  if(peer.clientId===S.myClientId) return;
-  let dev=peerWalkieByClient(peer.clientId);
-  if(dev){
-    dev.label=peer.hostname||dev.label;
-    dev.status=peer.status==='offline'?'offline':'online';
-    if(peer.freq) dev.freq=peer.freq;
-    if(peer.band) dev.band=peer.band;
-    if(peer.channel!=null) dev.channel=peer.channel;
-    renderNode(dev); redrawLinksOf(dev.id);
-    return;
-  }
-  addDevice('walkie',80+Math.random()*Math.max(120,field.clientWidth-180),80+Math.random()*Math.max(120,field.clientHeight-200),{
-    label:peer.hostname||peer.clientId,
-    status:peer.status==='offline'?'offline':'online',
-    ownerId:peer.clientId,
-    band:peer.band||'PMR446',
-    channel:peer.channel??1,
-    freq:peer.freq||getFreq(peer.band||'PMR446',peer.channel??1),
-    notes:`Peer walkie for ${peer.clientId}`,
-  });
-}
-function setPeerSnapshot(peers){
-  S.peers={};
-  (peers||[]).forEach(peer=>{if(peer?.clientId) S.peers[peer.clientId]=peer;});
-  renderPeersPanel();
-  Object.values(S.peers).forEach(upsertPeerWalkie);
-}
-
 function logEvent(type,msg,devId){
   const ev={type,msg,devId,time:now()};
   S.eventLog.unshift(ev);
@@ -1784,100 +1693,6 @@ function setNodeRxBadge(id,show,squelchClosed=false){
   if(rx) rx.style.display=show?'block':'none';
   if(sq) sq.style.display=squelchClosed?'block':'none';
 }
-class WebRTCManager{
-  constructor(socket,myClientId){
-    this.socket=socket; this.myClientId=myClientId;
-    this.localStream=null; this.localAnalyser=null; this.localAudioCtx=null;
-    this.peerConnections=new Map(); this.remoteAnalyzers=new Map(); this.remoteAudioCtx=null;
-    this.activeTxDevId=null; this.ticking=false;
-  }
-  supported(){return !!(window.RTCPeerConnection&&navigator.mediaDevices?.getUserMedia&&(window.AudioContext||window.webkitAudioContext));}
-  async requestMicrophone(){
-    if(this.localStream) return this.localStream;
-    if(!this.supported()) throw new Error('Browser not supported for WebRTC audio');
-    const modal=document.getElementById('mic-modal');
-    const allowed=await new Promise(resolve=>{
-      modal.classList.add('v');
-      const done=value=>{modal.classList.remove('v');document.getElementById('mic-continue').onclick=null;document.getElementById('mic-cancel').onclick=null;resolve(value);};
-      document.getElementById('mic-continue').onclick=()=>done(true);
-      document.getElementById('mic-cancel').onclick=()=>done(false);
-    });
-    if(!allowed) throw new Error('Mic denied — text-only mode');
-    this.localStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,sampleRate:16000}});
-    this.localAudioCtx=this.localAudioCtx||new (window.AudioContext||window.webkitAudioContext)();
-    const source=this.localAudioCtx.createMediaStreamSource(this.localStream);
-    this.localAnalyser=this.localAudioCtx.createAnalyser(); this.localAnalyser.fftSize=256;
-    source.connect(this.localAnalyser);
-    if(!this.ticking){this.ticking=true;this.tickMeters();}
-    return this.localStream;
-  }
-  tickMeters(){
-    const measure=analyser=>{
-      const buf=new Uint8Array(analyser.fftSize); analyser.getByteTimeDomainData(buf);
-      let peak=0; for(const v of buf) peak=Math.max(peak,Math.abs(v-128));
-      return peak/128*100;
-    };
-    if(this.localAnalyser&&this.activeTxDevId) setNodeMeter(this.activeTxDevId,measure(this.localAnalyser));
-    this.remoteAnalyzers.forEach((analyser,devId)=>setNodeMeter(devId,measure(analyser)));
-    requestAnimationFrame(()=>this.tickMeters());
-  }
-  createPeerConnection(peerId,meta={}){
-    const pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
-    pc.onicecandidate=e=>{if(e.candidate)this.socket?.emit('webrtc_ice',{to:peerId,from:this.myClientId,candidate:e.candidate});};
-    pc.ontrack=e=>this.attachRemoteAudio(peerId,e.streams[0],meta);
-    this.peerConnections.set(peerId,pc);
-    return pc;
-  }
-  attachRemoteAudio(peerId,stream,meta){
-    const dev=peerWalkieByClient(peerId); if(!dev) return;
-    const ctx=this.remoteAudioCtx||(this.remoteAudioCtx=new (window.AudioContext||window.webkitAudioContext)());
-    const audio=document.createElement('audio'); audio.autoplay=true; audio.playsInline=true; audio.srcObject=stream; document.getElementById('audio-stage').appendChild(audio);
-    const source=ctx.createMediaStreamSource(stream);
-    const high=ctx.createBiquadFilter(); high.type='highpass'; high.frequency.value=300;
-    const low=ctx.createBiquadFilter(); low.type='lowpass'; low.frequency.value=3400;
-    const gain=ctx.createGain(); const analyser=ctx.createAnalyser(); analyser.fftSize=256;
-    const quality=meta.signalQuality??70; const squelch=(dev.squelch||0)*10; const squelchClosed=quality<squelch;
-    gain.gain.value=squelchClosed?0:Math.max(.15,quality/100);
-    source.connect(high); high.connect(low); low.connect(gain); gain.connect(analyser); analyser.connect(ctx.destination);
-    this.remoteAnalyzers.set(dev.id,analyser); setNodeRxBadge(dev.id,true,squelchClosed); audio.play().catch(()=>{});
-  }
-  getEligiblePeers(dev){
-    return Object.values(S.peers).filter(peer=>peer&&peer.clientId!==S.myClientId&&peer.status!=='offline'&&Math.abs((peer.freq||446.006)-(dev.freq||446.006))<0.006);
-  }
-  async startTransmitting(dev){
-    const peers=this.getEligiblePeers(dev);
-    const stream=await this.requestMicrophone();
-    this.activeTxDevId=dev.id;
-    this.socket?.emit('ptt_start',{clientId:S.myClientId,band:dev.band,channel:dev.channel,freq:dev.freq,txPower:dev.txPower,targets:peers.map(p=>p.clientId)});
-    for(const peer of peers){
-      const pc=this.createPeerConnection(peer.clientId,{signalQuality:80});
-      stream.getTracks().forEach(track=>pc.addTrack(track,stream));
-      const offer=await pc.createOffer({offerToReceiveAudio:true});
-      await pc.setLocalDescription(offer);
-      this.socket?.emit('webrtc_offer',{to:peer.clientId,from:S.myClientId,sdp:offer,freq:dev.freq,band:dev.band,channel:dev.channel});
-    }
-  }
-  async handleOffer(data){
-    const pc=this.peerConnections.get(data.from)||this.createPeerConnection(data.from,{signalQuality:data.signalQuality||80});
-    await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-    const answer=await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    this.socket?.emit('webrtc_answer',{to:data.from,from:S.myClientId,sdp:answer});
-  }
-  async handleAnswer(data){
-    const pc=this.peerConnections.get(data.from); if(pc) await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-  }
-  async handleIce(data){
-    const pc=this.peerConnections.get(data.from); if(pc&&data.candidate) try{await pc.addIceCandidate(new RTCIceCandidate(data.candidate));}catch{}
-  }
-  stopTransmitting(dev){
-    this.activeTxDevId=null; setNodeMeter(dev.id,0);
-    this.socket?.emit('ptt_stop',{clientId:S.myClientId,band:dev.band,channel:dev.channel,freq:dev.freq});
-    this.peerConnections.forEach((pc,peerId)=>{pc.close(); const pdev=peerWalkieByClient(peerId); if(pdev){setNodeRxBadge(pdev.id,false,false); setNodeMeter(pdev.id,0);}});
-    this.peerConnections.clear();
-  }
-}
-RTC=null;
 WebRTCManager = class WebRTCManagerPhase2 {
   constructor(socket, myClientId) {
     this.socket = socket;
@@ -1901,7 +1716,7 @@ WebRTCManager = class WebRTCManagerPhase2 {
   }
 
   async requestMic() {
-    if (this.micGranted) return true;
+    if (this.micGranted && this.localStream?.getAudioTracks?.().some((track) => track.readyState === 'live')) return true;
     if (!(window.RTCPeerConnection && navigator.mediaDevices?.getUserMedia && (window.AudioContext || window.webkitAudioContext))) {
       toast('Browser not supported for live audio', 'warn', 4000);
       return false;
@@ -2031,12 +1846,23 @@ WebRTCManager = class WebRTCManagerPhase2 {
     }
   }
 
-  async stopTransmitting() {
+  stopTransmitting(dev) {
     if (!this.transmitting) return;
     this.transmitting = false;
-    this.socket.emit('ptt_stop', { clientId: this.myClientId });
-    for (const [, pc] of this.pcs) pc.close();
+    if (this.txGain) this.txGain.gain.value = 0;
+    if (this.localStream) {
+      this.localStream.getTracks().forEach((t) => t.stop());
+      this.localStream = null;
+    }
+    this.processedStream = null;
+    this.sourceNode = null;
+    this.analyser = null;
+    this.micGranted = false;
+    for (const [, pc] of this.pcs) { try { pc.close(); } catch(e){} }
     this.pcs.clear();
+    if (this.socket && dev) {
+      this.socket.emit('ptt_stop', { clientId: this.myClientId, band: dev.band, channel: dev.channel, freq: dev.freq });
+    }
   }
 
   async _callPeer(peerId) {
@@ -2171,17 +1997,10 @@ function showSquelchIndicator(active) {
 async function ownedWalkiePTT(devId) {
   const dev = S.devices[devId];
   if (!dev || dev.ownerId !== myClientId) return;
-
   if (_txMap.has(devId)) {
     stopTx(devId);
-    await webrtcManager?.stopTransmitting();
   } else {
-    startTx(devId);
-    const peers = Object.values(connectedPeers).filter(p =>
-      p.clientId !== myClientId &&
-      Math.abs((p.freq || 446.006) - (dev.freq || 446.006)) < 0.006
-    );
-    await webrtcManager?.startTransmitting(dev.freq, dev.band, dev.channel, peers);
+    await startTx(devId);
   }
 }
 function startMicLevelMeter(devId) {
@@ -2298,93 +2117,6 @@ function buildPalette(){
 /* ══════════════════════════════════════════
    FIELD EVENTS
 ══════════════════════════════════════════ */
-async function hydrateWhoAmI(){
-  getClientSession();
-  const who=await fetchWhoAmI();
-  if(who?.hostname){
-    S.myHostname=who.hostname;
-    sessionStorage.setItem('chemcham_hostname',who.hostname);
-    const suffix=(S.myClientId||'').split('-').slice(-1)[0]||randHex(4);
-    S.myClientId=`${who.hostname}-${suffix}`;
-    sessionStorage.setItem('chemcham_client_id',S.myClientId);
-  }
-}
-function registerClient(){
-  const dev=ensureOwnedWalkie();
-  S.myWalkieId=dev?.id||S.myWalkieId;
-  S.socket?.emit('client_register',{clientId:S.myClientId,hostname:S.myHostname,walkie_id:S.myWalkieId,band:dev?.band,channel:dev?.channel,freq:dev?.freq});
-}
-function initSocketSync(){
-  if(typeof io!=='function') return;
-  S.socket=io(serverBase(),{transports:['websocket','polling'],timeout:3000});
-  RTC=new WebRTCManager(S.socket,S.myClientId);
-  S.socket.on('connect',()=>{
-    S.socketConnected=true;
-    registerClient();
-    addEventLog('connect','Connected to CHEMCHAM server');
-    clearInterval(heartbeatTimer);
-    heartbeatTimer=setInterval(()=>{
-      const dev=ownedWalkie();
-      S.socket.emit('client_heartbeat',{clientId:S.myClientId,walkie_id:S.myWalkieId,band:dev?.band,channel:dev?.channel,freq:dev?.freq});
-    },10000);
-  });
-  S.socket.on('disconnect',()=>{
-    S.socketConnected=false;
-    clearInterval(heartbeatTimer);
-    addEventLog('disconnect','Server connection lost');
-    renderPeersPanel();
-  });
-  S.socket.on('client_registered',payload=>{
-    if(!S.fieldHydrated&&payload?.topology&&Object.keys(payload.topology.devices||{}).length){S.fieldHydrated=true;restoreTopology(payload.topology);}
-    setPeerSnapshot(payload?.peers||[]);
-    if(payload?.peer) upsertPeerWalkie(payload.peer);
-  });
-  S.socket.on('peer_snapshot',setPeerSnapshot);
-  S.socket.on('client_joined',peer=>{upsertPeerWalkie(peer);addEventLog('connect',`${peer.hostname||peer.clientId} joined the field`);});
-  S.socket.on('client_left',data=>{
-    const peer=data?.peer||S.peers[data?.clientId];
-    if(peer?.clientId){peer.status='grace';S.peers[peer.clientId]=peer;renderPeersPanel();}
-    addEventLog('disconnect',`${peer?.hostname||data?.clientId||'Peer'} disconnected`);
-  });
-  S.socket.on('client_offline',peer=>{
-    if(peer?.clientId){
-      S.peers[peer.clientId]=peer; renderPeersPanel();
-      const dev=peerWalkieByClient(peer.clientId); if(dev){dev.status='offline';renderNode(dev);}
-    }
-  });
-  S.socket.on('field_state',payload=>{
-    if(!S.fieldHydrated&&payload?.topology&&Object.keys(payload.topology.devices||{}).length){S.fieldHydrated=true;restoreTopology(payload.topology);}
-    setPeerSnapshot(payload?.peers||[]);
-  });
-  S.socket.on('topology_updated',payload=>{
-    if(payload?.topology&&!S.scanningSet.size&&S.mode!=='connect'){S.fieldHydrated=true;restoreTopology(payload.topology);}
-  });
-  S.socket.on('walkie_state',state=>{
-    const dev=peerWalkieByClient(state.clientId);
-    if(dev){Object.assign(dev,{band:state.band||dev.band,channel:state.channel??dev.channel,freq:state.freq||dev.freq}); renderNode(dev);}
-  });
-  S.socket.on('scan_update',scan=>addEventLog('scan',`${scan.device_id||'CHEMCHAM'} detected ${scan.total_signals||0} signals`));
-  S.socket.on('alerts',alerts=>(alerts||[]).forEach(a=>addEventLog('alert',a.alert_name||'Alert')));
-  S.socket.on('high_priority_alert',a=>{toast(a.alert_name||'High priority alert','err',4200);addEventLog('alert',a.alert_name||'High priority alert');});
-  S.socket.on('peer_tx_start',data=>{
-    const dev=peerWalkieByClient(data.clientId);
-    if(dev){
-      const txEl=document.querySelector(`#nd-${dev.id} .node-tx`); if(txEl) txEl.style.display='block';
-      addEventLog('tx',`${dev.label} transmitting on ${(data.freq||446.006).toFixed(3)} MHz`);
-    }
-  });
-  S.socket.on('peer_tx_stop',data=>{
-    const dev=peerWalkieByClient(data.clientId);
-    if(dev){
-      const txEl=document.querySelector(`#nd-${dev.id} .node-tx`); if(txEl) txEl.style.display='none';
-      setNodeRxBadge(dev.id,false,false); setNodeMeter(dev.id,0);
-    }
-  });
-  S.socket.on('webrtc_offer',data=>RTC?.handleOffer(data).catch(err=>toast(err.message||'WebRTC offer failed','err')));
-  S.socket.on('webrtc_answer',data=>RTC?.handleAnswer(data).catch(()=>{}));
-  S.socket.on('webrtc_ice',data=>RTC?.handleIce(data).catch(()=>{}));
-  window.addEventListener('beforeunload',()=>{try{S.socket?.emit('client_leave',{clientId:S.myClientId});}catch{}});
-}
 async function hydrateWhoAmI(){
   getClientSession();
   const who=await fetchWhoAmI();
@@ -2772,20 +2504,6 @@ function cancelConn(){
 /* ══════════════════════════════════════════
    SCAN LOGIC (FIX: continuous + no stop)
 ══════════════════════════════════════════ */
-function calcSignal(cc,wt){
-  const dda=DTYPES[cc.typeId],ddw=DTYPES[wt.typeId];
-  const dx=(wt.x+ddw.w/2)-(cc.x+dda.w/2),dy=(wt.y+ddw.h/2)-(cc.y+dda.h/2);
-  const distPx=Math.sqrt(dx*dx+dy*dy);
-  const distM=Math.max(1,distPx*12.5);
-  const freqMhz=wt.freq||446.006;
-  const fspl=20*Math.log10(distM)+20*Math.log10(freqMhz*1e6)-147.55;
-  const txDbm=27;
-  const rxDbm=txDbm-fspl;
-  const snr=Math.max(0,rxDbm+100);
-  const quality=Math.round(Math.max(0,Math.min(100,(rxDbm+95)*1.4)));
-  return{distM:Math.round(distM),rxDbm:Math.round(rxDbm*10)/10,snr:Math.round(snr*10)/10,quality,reachable:rxDbm>-95};
-}
-
 /* ═══ SIGNAL PHYSICS ═══ */
 function calcSignal(src,dst){
   const ds=DTYPES[src.typeId]||DTYPES.walkie,dd=DTYPES[dst.typeId]||DTYPES.walkie;
@@ -2808,71 +2526,6 @@ function calcSignal(src,dst){
 }
 
 /* ═══ BIDIRECTIONAL TX SYSTEM ═══ */
-const _txMap=new Map(); // devId → {timerId, loopId}
-
-function toggleTransmit(devId){
-  _txMap.has(devId)?stopTx(devId):startTx(devId);
-}
-
-async function startTx(devId){
-  const dev=S.devices[devId]; if(!dev) return;
-  if(_txMap.has(devId)) return;
-  if(dev.status==='offline'){toast('Device is offline','err');return;}
-  dev.transmitting=true; dev.status='transmitting';
-  S.transmittingSet.add(devId);
-  updateNodeDot(devId,'transmitting');
-  const txEl=document.querySelector('#nd-'+devId+' .node-tx');
-  if(txEl) txEl.style.display='block';
-  toast('📢 '+dev.label+' → TX on '+(dev.band||'PMR446')+' CH'+(dev.channel||1)+' ('+(dev.freq||446.006).toFixed(3)+' MHz)','warn',2200);
-
-  addEventLog('tx',`${dev.label} started transmitting`);
-  if(dev.ownerId===S.myClientId&&RTC){
-    try{await RTC.startTransmitting(dev);}catch(err){toast(err.message||'Microphone unavailable','err');}
-  }
-  const loopId=setInterval(()=>{
-    const src=S.devices[devId]; if(!src){stopTx(devId);return;}
-    const srcFreq=src.freq||446.006;
-    const targets=Object.values(S.devices).filter(d=>{
-      if(d.id===devId||d.status==='offline') return false;
-      return Math.abs((d.freq||446.006)-srcFreq)<0.006 || !!S.links[lkId(devId,d.id)];
-    });
-    targets.forEach(tgt=>{
-      const sig=calcSignal(src,tgt); if(!sig.reachable) return;
-      animatePkt(devId,tgt.id,'#22d3a0',0);      // A → B green
-      animatePkt(tgt.id,devId,'#06d6ff',320);    // B → A cyan (bidirectional)
-      // Flash receiving node
-      setNodeRxBadge(tgt.id,true,sig.quality<(tgt.squelch||0)*10);
-      if(tgt.ownerId!==S.myClientId) setNodeMeter(tgt.id,sig.quality);
-      const lid=lkId(devId,tgt.id);
-      if(S.links[lid]){S.links[lid].active=true;S.links[lid].quality=sig.quality;renderLink(S.links[lid]);}
-      // Update scan results live
-      Object.values(S.devices).filter(d=>d.typeId==='chemcham'&&(d.scanResults||[]).length).forEach(cc=>{
-        const r=(cc.scanResults||[]).find(x=>x.devId===devId);
-        if(r){const s2=calcSignal(src,cc);r.rxDbm=s2.rxDbm;r.quality=s2.quality;r.activeTx=true;r.ts=new Date().toLocaleTimeString();}
-      });
-    });
-    syncCounts();
-    if(S.selected===devId||targets.some(t=>t.id===S.selected)) refreshInsp();
-  },520);
-
-  const timerId=setTimeout(()=>stopTx(devId),(dev.txDuration||5000));
-  _txMap.set(devId,{timerId,loopId});
-  syncCounts(); if(S.selected===devId) renderInsp(devId);
-}
-
-function stopTx(devId){
-  const tx=_txMap.get(devId);
-  if(tx){clearTimeout(tx.timerId);clearInterval(tx.loopId);}
-  _txMap.delete(devId); S.transmittingSet.delete(devId);
-  const dev=S.devices[devId];
-  if(dev?.ownerId===S.myClientId&&RTC) RTC.stopTransmitting(dev);
-  if(dev){dev.transmitting=false;if(dev.status==='transmitting'){dev.status='online';updateNodeDot(devId,'online');}}
-  const txEl=document.querySelector('#nd-'+devId+' .node-tx'); if(txEl) txEl.style.display='none';
-  Object.values(S.links).forEach(lk=>{if(lk.a===devId||lk.b===devId){lk.active=false;renderLink(lk);}});
-  Object.values(S.devices).forEach(d=>{setNodeRxBadge(d.id,false,false); if(d.id!==devId) setNodeMeter(d.id,0);});
-  addEventLog('tx',`${dev?.label||devId} stopped transmitting`);
-  syncCounts(); if(S.selected===devId) renderInsp(devId);
-}
 
 function toggleTransmit(devId){
   const dev=S.devices[devId];
@@ -2891,7 +2544,10 @@ async function startTx(devId){
   if(txEl) txEl.style.display='block';
   toast('TX '+dev.label+' on '+(dev.band||'PMR446')+' CH'+(dev.channel||1)+' ('+(dev.freq||446.006).toFixed(3)+' MHz)','warn',2200);
   logEvent('tx',`${dev.label} started transmitting`,devId);
-  if(dev.ownerId===myClientId) startMicLevelMeter(devId);
+  if(dev.ownerId===myClientId&&RTC){
+    startMicLevelMeter(devId);
+    try{await RTC.startTransmitting(dev);}catch(err){toast(err.message||'Microphone unavailable','err');}
+  }
 
   const loopId=setInterval(()=>{
     const src=S.devices[devId]; if(!src){stopTx(devId);return;}
@@ -2931,7 +2587,11 @@ function stopTx(devId){
   const txEl=document.querySelector('#nd-'+devId+' .node-tx'); if(txEl) txEl.style.display='none';
   Object.values(S.links).forEach(lk=>{if(lk.a===devId||lk.b===devId){lk.active=false;renderLink(lk);}});
   Object.values(S.devices).forEach(d=>{setNodeRxBadge(d.id,false,false); if(d.id!==devId) setNodeMeter(d.id,0);});
-  if(dev?.ownerId===myClientId){stopMicLevelMeter(); showSquelchIndicator(false);}
+  if(dev?.ownerId===myClientId){
+    stopMicLevelMeter();
+    showSquelchIndicator(false);
+    if(RTC) RTC.stopTransmitting(dev);
+  }
   logEvent('tx',`${dev?.label||devId} stopped transmitting`,devId);
   syncCounts(); if(S.selected===devId) renderInsp(devId);
 }
@@ -3201,9 +2861,14 @@ async function doAutoScanLoop(){
    SELECTION + INSPECTOR
 ══════════════════════════════════════════ */
 function selectDevice(id){
-  if(S.selected) document.getElementById('nd-'+S.selected)?.classList.remove('sel');
+  const prevSelected=S.selected;
+  if(prevSelected) document.getElementById('nd-'+prevSelected)?.classList.remove('sel');
   S.selected=id;
-  if(id){document.getElementById('nd-'+id)?.classList.add('sel');S.inspTab='info';renderInsp(id);}
+  if(id){
+    document.getElementById('nd-'+id)?.classList.add('sel');
+    if(prevSelected!==id) S.inspTab='info';
+    renderInsp(id);
+  }
   else{showInspEmpty();}
 }
 function refreshInsp(){if(S.selected) renderInsp(S.selected);}
@@ -3221,6 +2886,7 @@ function renderInsp(id){
   const tabs=dev.typeId==='chemcham'
     ?[{id:'info',l:'Info'},{id:'hardware',l:'Hardware'},{id:'code',l:'Code'},{id:'scan',l:'Scan'}]
     :[{id:'info',l:'Info'},{id:'rf',l:'RF Config'}];
+  if(!tabs.find(t=>t.id===S.inspTab)) S.inspTab='info';
   const bar=document.getElementById('tab-bar');
   bar.innerHTML=tabs.map(t=>`<button class="tab${S.inspTab===t.id?' on':''}"
     onclick="switchTab('${id}','${t.id}')">${t.l}</button>`).join('');
@@ -3233,6 +2899,7 @@ function renderInsp(id){
   else if(S.inspTab==='code') renderTabCode(panel,dev);
   else if(S.inspTab==='scan') renderTabScan(panel,dev,id);
   else if(S.inspTab==='rf') renderTabRF(panel,dev,id);
+  else {S.inspTab='info';renderTabInfo(panel,dev,def);}
 }
 function switchTab(id,tab){S.inspTab=tab;renderInsp(id);}
 
@@ -3759,7 +3426,7 @@ document.getElementById('file-in').onchange=e=>{
   r.readAsText(f);e.target.value='';
 };
 function restoreTopology(data,opts={}){
-  const options={preserveSelection:false,persistLocal:true,...opts};
+  const options={preserveSelection:true,persistLocal:true,...opts};
   const prevSelected=options.preserveSelection?S.selected:null;
   const prevTab=options.preserveSelection?S.inspTab:'info';
   clearTopology();
