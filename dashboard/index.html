@@ -1,0 +1,1188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CHEMCHAM — RF Intelligence Platform</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#07090b;--bg2:#0d1014;--bg3:#131820;--bg4:#1a2028;
+  --border:#1a2028;--border2:#242e38;--border3:#2e3a48;
+  --text:#aab8c8;--muted:#3d4f62;--dim:#5a6e82;
+  --cc:#00ffcc;--cc2:rgba(0,255,204,.12);--cc3:rgba(0,255,204,.06);
+  --purple:#9b7ff4;--amber:#ffb347;--red:#ff4e6a;--blue:#4db8ff;
+  --green:#39d98a;--gray:#6b7a8d;
+  --mono:'Space Mono',monospace;--sans:'IBM Plex Sans',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:13px;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+
+/* ── HEADER ── */
+header{display:flex;align-items:center;justify-content:space-between;padding:0 18px;height:48px;border-bottom:1px solid var(--border);background:var(--bg2);flex-shrink:0}
+.logo{font-family:var(--mono);font-size:13px;font-weight:700;letter-spacing:.14em;color:var(--cc);display:flex;align-items:center;gap:10px}
+.logo-hex{width:20px;height:20px;position:relative;display:flex;align-items:center;justify-content:center}
+.logo-hex svg{width:20px;height:20px}
+@keyframes hexspin{0%,100%{opacity:1}50%{opacity:.4}}
+.hring{animation:hexspin 3s ease-in-out infinite}
+.header-r{display:flex;align-items:center;gap:16px}
+.ws-pill{display:flex;align-items:center;gap:6px;padding:3px 10px;border-radius:3px;border:1px solid var(--border2);font-family:var(--mono);font-size:9px;letter-spacing:.07em;cursor:pointer;transition:all .2s}
+.ws-pill.offline{color:var(--dim);border-color:var(--border2)}
+.ws-pill.connecting{color:var(--amber);border-color:rgba(255,179,71,.3);animation:pulse-amber 1s ease-in-out infinite}
+.ws-pill.online{color:var(--cc);border-color:rgba(0,255,204,.3)}
+@keyframes pulse-amber{0%,100%{opacity:1}50%{opacity:.5}}
+.ws-dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+.hclock{font-family:var(--mono);font-size:10px;color:var(--muted)}
+.ws-url-input{background:var(--bg3);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:10px;padding:4px 8px;border-radius:3px;width:200px;outline:none}
+.ws-url-input:focus{border-color:rgba(0,255,204,.3)}
+
+/* ── APP LAYOUT ── */
+.app{display:flex;flex:1;overflow:hidden}
+
+/* ── LEFT LIBRARY ── */
+.lib{width:188px;flex-shrink:0;border-right:1px solid var(--border);background:var(--bg2);display:flex;flex-direction:column}
+.lib-head{padding:9px 13px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:8px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.lib-body{flex:1;overflow-y:auto;padding:10px 9px}
+.lib-body::-webkit-scrollbar{width:2px}
+.lib-body::-webkit-scrollbar-thumb{background:var(--border2)}
+.lib-sec{font-family:var(--mono);font-size:7px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:8px 4px 5px;opacity:.5}
+
+/* CHEMCHAM card — special */
+.cc-card{background:var(--bg3);border:1px solid rgba(0,255,204,.2);border-radius:6px;padding:11px 10px;margin-bottom:8px;cursor:grab;transition:all .2s;user-select:none;position:relative;overflow:hidden}
+.cc-card::before{content:'';position:absolute;inset:0;background:var(--cc3);pointer-events:none}
+.cc-card:hover{border-color:rgba(0,255,204,.45);box-shadow:0 0 16px rgba(0,255,204,.06)}
+.cc-card:active{cursor:grabbing;transform:scale(.97)}
+.cc-card-top{display:flex;align-items:center;gap:7px;margin-bottom:5px}
+.cc-icon{width:22px;height:22px;flex-shrink:0}
+.cc-card-name{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--cc);letter-spacing:.05em}
+.cc-card-desc{font-size:9px;color:var(--dim);line-height:1.4}
+.cc-card-tag{display:inline-block;font-family:var(--mono);font-size:7px;padding:1px 6px;border-radius:2px;border:1px solid rgba(0,255,204,.3);color:var(--cc);background:rgba(0,255,204,.06);margin-top:5px}
+
+/* regular device cards */
+.dev-card{background:var(--bg3);border:1px solid var(--border2);border-radius:5px;padding:9px 10px;margin-bottom:7px;cursor:grab;transition:all .15s;user-select:none;position:relative}
+.dev-card:hover{border-color:var(--border3);box-shadow:0 0 8px rgba(0,0,0,.4)}
+.dev-card:active{cursor:grabbing;transform:scale(.97)}
+.dev-icon{font-size:18px;margin-bottom:4px;display:block}
+.dev-name{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--text);margin-bottom:2px}
+.dev-desc{font-size:9px;color:var(--dim);line-height:1.4}
+.dev-badge{position:absolute;top:6px;right:6px;font-family:var(--mono);font-size:7px;padding:1px 5px;border-radius:2px;border:1px solid}
+.b-rf{border-color:rgba(155,127,244,.35);color:var(--purple);background:rgba(155,127,244,.07)}
+.b-iot{border-color:rgba(77,184,255,.35);color:var(--blue);background:rgba(77,184,255,.07)}
+.lib-tip{font-size:9px;color:var(--muted);text-align:center;padding:12px 6px;line-height:1.7;border:1px dashed var(--border2);border-radius:5px;margin-top:6px}
+
+/* ── CENTER FIELD ── */
+.field-wrap{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.toolbar{display:flex;align-items:center;gap:6px;padding:5px 12px;border-bottom:1px solid var(--border);background:var(--bg2);flex-shrink:0;flex-wrap:wrap}
+.tb-btn{padding:4px 10px;border-radius:3px;border:1px solid var(--border2);background:transparent;color:var(--dim);font-family:var(--mono);font-size:8px;letter-spacing:.06em;cursor:pointer;transition:all .15s;white-space:nowrap}
+.tb-btn:hover{border-color:var(--cc);color:var(--cc)}
+.tb-btn.warn:hover{border-color:var(--red);color:var(--red)}
+.tb-sep{width:1px;height:13px;background:var(--border2);flex-shrink:0}
+.tb-hint{font-family:var(--mono);font-size:8px;color:var(--muted);margin-left:auto}
+.tb-link-active{border-color:rgba(255,179,71,.5)!important;color:var(--amber)!important}
+
+.field{flex:1;position:relative;overflow:hidden;background:var(--bg)}
+.field::before{content:'';position:absolute;inset:0;background-image:radial-gradient(circle,rgba(26,32,40,.85) 1px,transparent 1px);background-size:30px 30px;pointer-events:none;z-index:0}
+#fsvg{position:absolute;inset:0;width:100%;height:100%;z-index:1;pointer-events:none}
+
+/* ── FIELD NODES ── */
+.fn{position:absolute;z-index:5;cursor:move;user-select:none}
+
+/* CHEMCHAM field node — special */
+.cc-body{background:var(--bg3);border:1px solid rgba(0,255,204,.3);border-radius:10px;padding:12px 14px;min-width:148px;position:relative;overflow:hidden;transition:border-color .2s,box-shadow .2s}
+.cc-body::before{content:'';position:absolute;inset:0;background:var(--cc3);pointer-events:none}
+.cc-body.selected{border-color:var(--cc);box-shadow:0 0 20px rgba(0,255,204,.12)}
+.cc-body.scanning{border-color:var(--cc);box-shadow:0 0 24px rgba(0,255,204,.18)}
+.cc-node-name{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--cc);letter-spacing:.06em;margin-bottom:2px;display:flex;align-items:center;gap:7px}
+.cc-node-sub{font-size:9px;color:var(--dim);margin-bottom:9px}
+.cc-scan-btn{width:100%;padding:7px;border:1px solid rgba(0,255,204,.35);border-radius:4px;background:rgba(0,255,204,.06);color:var(--cc);font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.1em;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:7px}
+.cc-scan-btn:hover{background:rgba(0,255,204,.12);border-color:rgba(0,255,204,.6)}
+.cc-scan-btn.scanning{animation:scan-pulse 1.2s ease-in-out infinite;border-color:var(--cc)}
+@keyframes scan-pulse{0%,100%{background:rgba(0,255,204,.08)}50%{background:rgba(0,255,204,.18)}}
+.cc-scan-dot{width:7px;height:7px;border-radius:50%;background:var(--cc);flex-shrink:0}
+.cc-scan-dot.off{background:var(--muted)}
+.cc-scan-dot.scanning{animation:blink 0.9s ease-in-out infinite}
+.cc-status{font-family:var(--mono);font-size:8px;color:var(--dim);margin-top:6px;letter-spacing:.04em}
+.cc-status.active{color:var(--cc)}
+.cc-status.err{color:var(--red)}
+.cc-del{position:absolute;top:6px;right:6px;width:18px;height:18px;border:1px solid var(--border2);border-radius:3px;background:transparent;color:var(--muted);font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s}
+.cc-del:hover{border-color:var(--red);color:var(--red)}
+
+/* Radar ring animation */
+@keyframes radar{0%{transform:scale(1);opacity:.6}100%{transform:scale(3.5);opacity:0}}
+.cc-radar{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:100%;height:100%;border-radius:50%;border:1px solid rgba(0,255,204,.4);pointer-events:none;display:none}
+.cc-body.scanning .cc-radar{display:block;animation:radar 2s ease-out infinite}
+.cc-body.scanning .cc-radar:nth-child(2){animation-delay:.7s}
+
+/* regular device node */
+.node-body{background:var(--bg3);border:1px solid var(--border2);border-radius:7px;padding:9px 11px;min-width:116px;position:relative;transition:border-color .2s,box-shadow .2s}
+.node-body.selected{border-color:rgba(0,255,204,.4);box-shadow:0 0 12px rgba(0,255,204,.08)}
+.node-body.detected{border-color:var(--green);box-shadow:0 0 14px rgba(57,217,138,.2);animation:det-glow 1.5s ease-in-out infinite}
+@keyframes det-glow{0%,100%{box-shadow:0 0 10px rgba(57,217,138,.15)}50%{box-shadow:0 0 22px rgba(57,217,138,.35)}}
+.node-body.lk-src{border-color:var(--amber);box-shadow:0 0 10px rgba(255,179,71,.18)}
+.n-status{position:absolute;top:8px;right:8px;width:6px;height:6px;border-radius:50%;background:var(--muted)}
+.n-status.on{background:var(--green);box-shadow:0 0 5px var(--green)}
+.n-status.det{background:var(--cc);animation:blink .7s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+.n-icon{font-size:16px;display:block;margin-bottom:3px}
+.n-name{font-family:var(--mono);font-size:9px;font-weight:700;color:var(--text);margin-bottom:1px;white-space:nowrap}
+.n-sub{font-size:8px;color:var(--dim);margin-bottom:5px}
+.n-freq{font-family:var(--mono);font-size:9px;color:var(--purple);margin-bottom:6px}
+.n-acts{display:flex;gap:3px}
+.na{flex:1;padding:3px 0;border:1px solid var(--border2);border-radius:3px;background:transparent;color:var(--dim);font-family:var(--mono);font-size:7px;cursor:pointer;transition:all .15s}
+.na:hover{border-color:var(--cc);color:var(--cc)}
+.na.del:hover{border-color:var(--red);color:var(--red)}
+
+/* connection labels */
+.cl{position:absolute;z-index:6;pointer-events:none}
+.cb{background:var(--bg3);border:1px solid rgba(155,127,244,.3);border-radius:3px;padding:2px 7px;font-family:var(--mono);font-size:8px;color:var(--purple);white-space:nowrap;cursor:pointer;pointer-events:all;transition:all .15s}
+.cb:hover{border-color:var(--purple);background:rgba(155,127,244,.1)}
+
+/* drop hint */
+.dh{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:2;pointer-events:none}
+.dh-box{border:1px dashed rgba(0,255,204,.1);border-radius:10px;padding:26px 40px;text-align:center}
+.dh-box h3{font-family:var(--mono);font-size:11px;color:rgba(0,255,204,.2);letter-spacing:.1em;margin-bottom:8px}
+.dh-box p{font-size:10px;color:var(--muted);line-height:1.8}
+
+/* ── RIGHT: INTELLIGENCE PANEL ── */
+.intel{width:268px;flex-shrink:0;border-left:1px solid var(--border);background:var(--bg2);display:flex;flex-direction:column;overflow:hidden}
+.intel-head{padding:8px 13px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.intel-title{font-family:var(--mono);font-size:8px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.intel-badge{font-family:var(--mono);font-size:7px;padding:1px 6px;border-radius:2px}
+.intel-badge.live{background:rgba(0,255,204,.1);color:var(--cc);border:1px solid rgba(0,255,204,.2)}
+.intel-badge.off{background:rgba(61,79,98,.15);color:var(--dim);border:1px solid var(--border2)}
+.intel-scroll{flex:1;overflow-y:auto;display:flex;flex-direction:column}
+.intel-scroll::-webkit-scrollbar{width:2px}
+.intel-scroll::-webkit-scrollbar-thumb{background:var(--border2);border-radius:1px}
+
+/* CHEMCHAM status card */
+.cc-status-card{padding:12px 13px;border-bottom:1px solid var(--border);flex-shrink:0}
+.cc-sc-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.cc-sc-name{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--cc);letter-spacing:.06em}
+.cc-sc-state{font-family:var(--mono);font-size:8px;padding:2px 8px;border-radius:2px}
+.cc-sc-state.offline{color:var(--dim);border:1px solid var(--border2)}
+.cc-sc-state.scanning{color:var(--cc);border:1px solid rgba(0,255,204,.3);animation:pulse-green .9s ease-in-out infinite}
+.cc-sc-state.error{color:var(--red);border:1px solid rgba(255,78,106,.3)}
+@keyframes pulse-green{0%,100%{opacity:1}50%{opacity:.4}}
+.cc-sc-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0}
+.cc-sc-stat{text-align:center;padding:7px 4px;border-right:1px solid var(--border)}
+.cc-sc-stat:last-child{border-right:none}
+.cc-sc-sv{font-family:var(--mono);font-size:16px;font-weight:700;line-height:1;color:var(--cc)}
+.cc-sc-sl{font-family:var(--mono);font-size:7px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:2px}
+
+/* No hardware warning */
+.no-hw{padding:16px 13px;background:rgba(255,179,71,.04);border-bottom:1px solid rgba(255,179,71,.1)}
+.no-hw-title{font-family:var(--mono);font-size:9px;color:var(--amber);margin-bottom:6px;letter-spacing:.05em}
+.no-hw-body{font-size:10px;color:var(--dim);line-height:1.6}
+.no-hw-body code{font-family:var(--mono);font-size:9px;color:var(--amber);background:rgba(255,179,71,.08);padding:1px 5px;border-radius:2px}
+
+/* Device signal cards */
+.sig-section{padding:8px 13px 4px;font-family:var(--mono);font-size:7px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);flex-shrink:0}
+.sig-card{margin:0 9px 6px;padding:9px 10px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;transition:border-color .3s;flex-shrink:0}
+.sig-card.active{border-color:rgba(57,217,138,.35)}
+.sig-card.silent{opacity:.55}
+.sig-card-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:5px}
+.sig-card-name{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--text)}
+.sig-card-state{font-family:var(--mono);font-size:7px;padding:1px 6px;border-radius:2px}
+.sig-card-state.active{color:var(--green);border:1px solid rgba(57,217,138,.3);background:rgba(57,217,138,.07)}
+.sig-card-state.silent{color:var(--muted);border:1px solid var(--border2)}
+.sig-card-freq{font-family:var(--mono);font-size:9px;color:var(--purple);margin-bottom:4px}
+.rssi-row{display:flex;align-items:center;gap:7px;margin-bottom:4px}
+.rssi-bar-bg{flex:1;height:4px;background:var(--border);border-radius:2px;overflow:hidden}
+.rssi-bar-fill{height:100%;border-radius:2px;background:var(--green);transition:width .4s ease}
+.rssi-val{font-family:var(--mono);font-size:9px;color:var(--text);min-width:52px;text-align:right}
+.sig-spark{width:100%;height:28px;margin-top:4px}
+.sig-meta{display:flex;justify-content:space-between;margin-top:4px}
+.sig-meta-item{font-size:8px;color:var(--dim)}
+.sig-meta-item span{color:var(--text)}
+
+/* Unknown signals */
+.unk-card{margin:0 9px 4px;padding:6px 9px;background:rgba(107,122,141,.06);border:1px solid rgba(107,122,141,.15);border-radius:5px;display:flex;align-items:center;gap:8px;flex-shrink:0}
+.unk-dot{width:5px;height:5px;border-radius:50%;background:var(--gray);flex-shrink:0}
+.unk-freq{font-family:var(--mono);font-size:9px;color:var(--dim);flex:1}
+.unk-rssi{font-family:var(--mono);font-size:9px;color:var(--muted)}
+.unk-band{font-family:var(--mono);font-size:7px;color:var(--gray);border:1px solid rgba(107,122,141,.2);padding:1px 5px;border-radius:2px}
+
+/* Live log */
+.log-box{flex:1;overflow-y:auto;min-height:80px;padding-bottom:8px}
+.log-box::-webkit-scrollbar{width:2px}
+.log-row{display:flex;align-items:center;gap:5px;padding:3px 13px;border-bottom:1px solid rgba(26,32,40,.6);animation:rowIn .2s ease}
+@keyframes rowIn{from{opacity:0;transform:translateX(5px)}to{opacity:1;transform:none}}
+.lr-freq{font-family:var(--mono);font-size:9px;color:var(--cc);min-width:66px}
+.lr-rssi{font-family:var(--mono);font-size:8px;color:var(--muted);min-width:38px}
+.lr-who{font-size:8px;border:1px solid;padding:0 4px;border-radius:2px;white-space:nowrap}
+
+/* ── MODALS ── */
+.overlay{position:fixed;inset:0;background:rgba(7,9,11,.9);z-index:100;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px)}
+.overlay.hidden{display:none}
+.modal{background:var(--bg2);border:1px solid var(--border3);border-radius:9px;max-height:88vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.7)}
+.modal::-webkit-scrollbar{width:3px}
+.modal::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:13px 17px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg2);z-index:1}
+.modal-title{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--text);letter-spacing:.07em}
+.modal-x{width:22px;height:22px;border:1px solid var(--border2);border-radius:3px;background:transparent;color:var(--dim);cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;transition:all .15s}
+.modal-x:hover{border-color:var(--red);color:var(--red)}
+.modal-body{padding:16px}
+
+/* freq config modal */
+.fc-row{margin-bottom:12px}
+.fc-label{font-family:var(--mono);font-size:7px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+select.fsel{background:var(--bg3);color:var(--text);border:1px solid var(--border2);padding:6px 9px;border-radius:4px;font-family:var(--mono);font-size:10px;outline:none;width:100%}
+select.fsel:focus{border-color:rgba(0,255,204,.3)}
+.fsel-hint{font-size:9px;color:var(--dim);margin-top:5px;line-height:1.5}
+
+/* connection config modal */
+.cf-radios{display:flex;gap:5px}
+.cfr{flex:1;padding:5px;border:1px solid var(--border2);border-radius:3px;text-align:center;cursor:pointer;font-family:var(--mono);font-size:8px;color:var(--dim);transition:all .15s}
+.cfr.sel{border-color:var(--purple);color:var(--purple);background:rgba(155,127,244,.08)}
+.cfr:not(.sel):hover{color:var(--text);border-color:var(--border3)}
+.cf-live{display:flex;align-items:center;gap:7px;padding:8px 11px;background:rgba(0,255,204,.04);border:1px solid rgba(0,255,204,.12);border-radius:5px;margin:12px 0}
+.cf-live-dot{width:7px;height:7px;border-radius:50%;background:var(--cc);flex-shrink:0;animation:blink 1.5s infinite}
+.cf-live-txt{font-size:9px;color:var(--cc)}
+.sl-row{display:flex;align-items:center;gap:8px;margin-top:4px}
+input[type=range]{flex:1;height:2px;-webkit-appearance:none;background:var(--border2);border-radius:1px;outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:var(--cc);cursor:pointer}
+.sv{font-family:var(--mono);font-size:9px;color:var(--cc);min-width:44px;text-align:right}
+
+/* SDR info modal */
+.sdr-hero{background:var(--bg3);border:1px solid var(--border2);border-radius:7px;padding:13px;margin-bottom:16px;display:flex;gap:12px}
+.sdr-hi{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--cc);margin-bottom:4px}
+.sdr-hp{font-size:10px;color:var(--dim);line-height:1.6}
+.spec-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:16px}
+.si{background:var(--bg3);border:1px solid var(--border2);border-radius:4px;padding:8px 10px}
+.sk{font-family:var(--mono);font-size:7px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:2px}
+.sv2{font-family:var(--mono);font-size:10px;color:var(--text);font-weight:700}
+.sv2.hi{color:var(--cc)}
+.comp{background:var(--bg3);border:1px solid var(--border2);border-radius:4px;padding:8px 11px;margin-bottom:6px;display:flex;gap:9px}
+.cp{font-family:var(--mono);font-size:9px;font-weight:700;color:var(--text);margin-bottom:2px}
+.cd{font-size:9px;color:var(--dim);line-height:1.5}
+.flow{display:flex;align-items:stretch;overflow-x:auto;gap:0;margin-bottom:16px}
+.fs{background:var(--bg3);border:1px solid var(--border2);border-radius:4px;padding:6px 8px;min-width:70px;text-align:center;flex-shrink:0}
+.fa{display:flex;align-items:center;padding:0 3px;color:var(--dim);font-size:10px;flex-shrink:0}
+.fn2{font-family:var(--mono);font-size:7px;color:var(--cc);margin-bottom:2px}
+.ft{font-size:8px;color:var(--text);line-height:1.4}
+.sec-lbl{font-family:var(--mono);font-size:7px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+.btn-row{display:flex;gap:6px;margin-top:12px}
+.btn{padding:7px 13px;border-radius:3px;border:1px solid var(--border2);background:transparent;color:var(--text);font-family:var(--mono);font-size:8px;cursor:pointer;transition:all .15s;letter-spacing:.05em}
+.btn:hover{border-color:var(--cc);color:var(--cc)}
+.btn.primary{background:rgba(0,255,204,.08);border-color:rgba(0,255,204,.3);color:var(--cc)}
+.btn.primary:hover{background:rgba(0,255,204,.15)}
+.btn.danger{color:var(--red);border-color:rgba(255,78,106,.25)}
+.btn.danger:hover{background:rgba(255,78,106,.07)}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <div class="logo">
+    <div class="logo-hex">
+      <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <polygon points="10,1 18,5.5 18,14.5 10,19 2,14.5 2,5.5" stroke="#00ffcc" stroke-width="1" fill="rgba(0,255,204,.06)" class="hring"/>
+        <circle cx="10" cy="10" r="2.5" fill="#00ffcc"/>
+      </svg>
+    </div>
+    CHEMCHAM
+  </div>
+  <div class="header-r">
+    <input class="ws-url-input" id="ws-url" value="ws://localhost:8765" placeholder="ws://host:port" title="WebSocket server address">
+    <div class="ws-pill offline" id="ws-pill" onclick="toggleScan()">
+      <div class="ws-dot"></div>
+      <span id="ws-pill-txt">OFFLINE</span>
+    </div>
+    <div class="hclock" id="clock">--:--:--</div>
+  </div>
+</header>
+
+<div class="app">
+
+<!-- LEFT: Device Library -->
+<div class="lib">
+  <div class="lib-head">DEVICE LIBRARY</div>
+  <div class="lib-body">
+
+    <div class="cc-card" draggable="true" ondragstart="startDrag(event,'chemcham')">
+      <div class="cc-card-top">
+        <svg class="cc-icon" viewBox="0 0 22 22" fill="none"><polygon points="11,2 19,6 19,16 11,20 3,16 3,6" stroke="#00ffcc" stroke-width="1" fill="rgba(0,255,204,.06)"/><circle cx="11" cy="11" r="3" fill="#00ffcc"/><line x1="11" y1="2" x2="11" y2="5" stroke="#00ffcc" stroke-width="1"/><line x1="11" y1="17" x2="11" y2="20" stroke="#00ffcc" stroke-width="1"/></svg>
+        <div class="cc-card-name">CHEMCHAM</div>
+      </div>
+      <div class="cc-card-desc">IoT SDR scanner · Pi Zero 2W + RTL-SDR · 24 MHz–1.7 GHz passive monitoring</div>
+      <div class="cc-card-tag">SDR DEVICE</div>
+    </div>
+
+    <div class="lib-sec">RF Transceivers</div>
+
+    <div class="dev-card" draggable="true" ondragstart="startDrag(event,'walkie')">
+      <span class="dev-badge b-rf">PMR446</span>
+      <span class="dev-icon">📻</span>
+      <div class="dev-name">Walkie-Talkie</div>
+      <div class="dev-desc">PMR446 · 8 channels<br>0.5W FM transceiver</div>
+    </div>
+
+    <div class="dev-card" draggable="true" ondragstart="startDrag(event,'repeater')">
+      <span class="dev-badge b-rf">RELAY</span>
+      <span class="dev-icon">🗼</span>
+      <div class="dev-name">Repeater Node</div>
+      <div class="dev-desc">VHF/UHF relay<br>+10 dB gain boost</div>
+    </div>
+
+    <div class="lib-sec">Sensors</div>
+    <div class="dev-card" draggable="true" ondragstart="startDrag(event,'sensor')">
+      <span class="dev-badge b-iot">ISM</span>
+      <span class="dev-icon">🌡️</span>
+      <div class="dev-name">Env. Sensor</div>
+      <div class="dev-desc">ISM-433 wireless<br>temp · humidity</div>
+    </div>
+
+    <div class="lib-tip">1. Drag CHEMCHAM to field<br>2. Drag devices to register<br>3. Click SCAN to detect</div>
+  </div>
+</div>
+
+<!-- CENTER: Field -->
+<div class="field-wrap">
+  <div class="toolbar">
+    <button class="tb-btn" id="btn-link" onclick="toggleLink()">LINK DEVICES</button>
+    <div class="tb-sep"></div>
+    <button class="tb-btn" onclick="autoArrange()">AUTO-ARRANGE</button>
+    <button class="tb-btn warn" onclick="removeSelected()">REMOVE</button>
+    <button class="tb-btn warn" onclick="clearAll()">CLEAR ALL</button>
+    <div class="tb-hint" id="tb-hint">Drag CHEMCHAM from the left · then add field devices</div>
+  </div>
+
+  <div class="field" id="field"
+    ondragover="event.preventDefault()"
+    ondrop="onDrop(event)"
+    onclick="onFieldBg(event)"
+    onmousemove="onMouseMove(event)">
+
+    <svg id="fsvg"></svg>
+
+    <div class="dh" id="dh">
+      <div class="dh-box">
+        <h3>RF SIMULATION FIELD</h3>
+        <p>Drop <strong style="color:rgba(0,255,204,.5)">CHEMCHAM</strong> from the left panel.<br>Then add walkie-talkies as field targets.<br><br>Configure their frequencies, then press<br><strong style="color:rgba(0,255,204,.5)">SCAN</strong> on CHEMCHAM to detect real signals.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- RIGHT: Intelligence Panel -->
+<div class="intel">
+  <div class="intel-head">
+    <span class="intel-title">CHEMCHAM INTELLIGENCE</span>
+    <span class="intel-badge off" id="intel-badge">OFFLINE</span>
+  </div>
+  <div class="intel-scroll" id="intel-scroll">
+
+    <!-- CHEMCHAM status card -->
+    <div class="cc-status-card" id="cc-status-card">
+      <div class="cc-sc-top">
+        <div class="cc-sc-name">CHEMCHAM</div>
+        <div class="cc-sc-state offline" id="cc-state">OFFLINE</div>
+      </div>
+      <div class="cc-sc-stats">
+        <div class="cc-sc-stat">
+          <div class="cc-sc-sv" id="sc-detected">0</div>
+          <div class="cc-sc-sl">Detected</div>
+        </div>
+        <div class="cc-sc-stat">
+          <div class="cc-sc-sv" id="sc-attributed">0</div>
+          <div class="cc-sc-sl">Attributed</div>
+        </div>
+        <div class="cc-sc-stat">
+          <div class="cc-sc-sv" id="sc-scans">0</div>
+          <div class="cc-sc-sl">Scans</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- No hardware warning (shown when offline) -->
+    <div class="no-hw" id="no-hw">
+      <div class="no-hw-title">⚠ NO HARDWARE CONNECTED</div>
+      <div class="no-hw-body">
+        To use real signals, run the backend:<br><br>
+        <code>python server.py --simulate</code><br><br>
+        or with real RTL-SDR hardware:<br>
+        <code>python server.py</code><br><br>
+        Then press SCAN on the CHEMCHAM node or click the pill in the header.
+      </div>
+    </div>
+
+    <!-- Registered devices section -->
+    <div class="sig-section" id="sec-registered" style="display:none">REGISTERED FIELD DEVICES</div>
+    <div id="reg-cards"></div>
+
+    <!-- Unknown signals -->
+    <div class="sig-section" id="sec-unknown" style="display:none">UNKNOWN SIGNALS</div>
+    <div id="unk-cards"></div>
+
+    <!-- Log -->
+    <div class="intel-head" style="border-top:1px solid var(--border);flex-shrink:0">
+      <span class="intel-title">SIGNAL LOG</span>
+    </div>
+    <div class="log-box" id="log-box"></div>
+
+  </div>
+</div>
+</div>
+
+<!-- MODAL: Frequency Config for walkie -->
+<div class="overlay hidden" id="freq-modal" onclick="if(event.target===this)closeFreqModal()">
+  <div class="modal" style="width:340px">
+    <div class="modal-head">
+      <span class="modal-title">📻 DEVICE FREQUENCY CONFIG</span>
+      <button class="modal-x" onclick="closeFreqModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="fc-row">
+        <div class="fc-label">PMR446 Channel</div>
+        <select class="fsel" id="fc-ch" onchange="updateFreqHint()">
+          <option value="1">CH 1 — 446.00625 MHz</option>
+          <option value="2">CH 2 — 446.01875 MHz</option>
+          <option value="3">CH 3 — 446.03125 MHz</option>
+          <option value="4" selected>CH 4 — 446.04375 MHz</option>
+          <option value="5">CH 5 — 446.05625 MHz</option>
+          <option value="6">CH 6 — 446.06875 MHz</option>
+          <option value="7">CH 7 — 446.08125 MHz</option>
+          <option value="8">CH 8 — 446.09375 MHz</option>
+        </select>
+        <div class="fsel-hint" id="freq-hint">CHEMCHAM will look for signals within ±15 kHz of this frequency and attribute them to this device.</div>
+      </div>
+      <div class="btn-row">
+        <button class="btn primary" onclick="applyFreqConfig()">REGISTER</button>
+        <button class="btn" onclick="closeFreqModal()">CANCEL</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Link Config -->
+<div class="overlay hidden" id="link-modal" onclick="if(event.target===this)closeLinkModal()">
+  <div class="modal" style="width:380px">
+    <div class="modal-head">
+      <span class="modal-title">🔗 RF LINK — SIMULATION CONFIG</span>
+      <button class="modal-x" onclick="closeLinkModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="fc-row">
+        <div class="fc-label">PMR446 Channel</div>
+        <select class="fsel" id="lc-ch" onchange="refreshLinkStatus()">
+          <option value="1">CH 1 — 446.00625 MHz</option>
+          <option value="2">CH 2 — 446.01875 MHz</option>
+          <option value="3">CH 3 — 446.03125 MHz</option>
+          <option value="4" selected>CH 4 — 446.04375 MHz</option>
+          <option value="5">CH 5 — 446.05625 MHz</option>
+          <option value="6">CH 6 — 446.06875 MHz</option>
+          <option value="7">CH 7 — 446.08125 MHz</option>
+          <option value="8">CH 8 — 446.09375 MHz</option>
+        </select>
+      </div>
+      <div class="fc-row">
+        <div class="fc-label">Mode</div>
+        <div class="cf-radios">
+          <div class="cfr sel" onclick="pickMode(this,'simplex')">Simplex</div>
+          <div class="cfr" onclick="pickMode(this,'half-duplex')">Half-duplex</div>
+          <div class="cfr" onclick="pickMode(this,'monitor')">Monitor</div>
+        </div>
+      </div>
+      <div class="fc-row">
+        <div class="fc-label">TX Power</div>
+        <div class="sl-row">
+          <input type="range" min="1" max="5" value="3" id="lc-pw"
+            oninput="document.getElementById('lc-pw-v').textContent=['100mW','200mW','500mW','1W','5W'][this.value-1];refreshLinkStatus()">
+          <span class="sv" id="lc-pw-v">500mW</span>
+        </div>
+      </div>
+      <div class="fc-row">
+        <div class="fc-label">Simulated distance</div>
+        <div class="sl-row">
+          <input type="range" min="10" max="3000" value="300" id="lc-dist"
+            oninput="document.getElementById('lc-dist-v').textContent=this.value+'m';refreshLinkStatus()">
+          <span class="sv" id="lc-dist-v">300m</span>
+        </div>
+      </div>
+      <div class="cf-live">
+        <div class="cf-live-dot"></div>
+        <div class="cf-live-txt" id="lc-live-txt">CH4 · 446.04375 MHz · −62 dBm · 300m</div>
+      </div>
+      <div class="btn-row">
+        <button class="btn primary" onclick="applyLink()">APPLY</button>
+        <button class="btn danger" onclick="deleteLink()">REMOVE</button>
+        <button class="btn" onclick="closeLinkModal()">CANCEL</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: SDR Info -->
+<div class="overlay hidden" id="sdr-modal" onclick="if(event.target===this)document.getElementById('sdr-modal').classList.add('hidden')">
+  <div class="modal" style="width:500px">
+    <div class="modal-head">
+      <span class="modal-title">CHEMCHAM — DEVICE INTERNALS & SPECIFICATIONS</span>
+      <button class="modal-x" onclick="document.getElementById('sdr-modal').classList.add('hidden')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="sdr-hero">
+        <svg width="44" height="44" viewBox="0 0 44 44" fill="none" flex-shrink="0" style="flex-shrink:0"><polygon points="22,3 39,11 39,33 22,41 5,33 5,11" stroke="#00ffcc" stroke-width="1.5" fill="rgba(0,255,204,.06)"/><circle cx="22" cy="22" r="5" fill="#00ffcc"/><line x1="22" y1="3" x2="22" y2="10" stroke="#00ffcc" stroke-width="1"/><line x1="22" y1="34" x2="22" y2="41" stroke="#00ffcc" stroke-width="1"/><line x1="5" y1="22" x2="12" y2="22" stroke="#00ffcc" stroke-width="1"/><line x1="32" y1="22" x2="39" y2="22" stroke="#00ffcc" stroke-width="1"/></svg>
+        <div>
+          <div class="sdr-hi">CHEMCHAM — IoT RF Monitor v1.0</div>
+          <p class="sdr-hp">A fully passive, wide-band RF scanning device built on a Raspberry Pi Zero 2W and RTL-SDR v3 dongle. CHEMCHAM does not transmit — it only listens. It detects signals across 7 frequency bands, attributes them to registered field devices by frequency matching, and streams analysis to this dashboard in real time over WebSocket.</p>
+        </div>
+      </div>
+
+      <div class="sec-lbl">Hardware specifications</div>
+      <div class="spec-grid">
+        <div class="si"><div class="sk">Processor</div><div class="sv2 hi">ARM Cortex-A53 1GHz</div></div>
+        <div class="si"><div class="sk">RAM</div><div class="sv2">512 MB LPDDR2</div></div>
+        <div class="si"><div class="sk">RF Tuner</div><div class="sv2 hi">RTL2832U + R820T2</div></div>
+        <div class="si"><div class="sk">Frequency range</div><div class="sv2">24 MHz – 1.766 GHz</div></div>
+        <div class="si"><div class="sk">Sample rate</div><div class="sv2 hi">Up to 3.2 MS/s</div></div>
+        <div class="si"><div class="sk">ADC resolution</div><div class="sv2">8-bit IQ samples</div></div>
+        <div class="si"><div class="sk">Connectivity</div><div class="sv2">WiFi 802.11 b/g/n</div></div>
+        <div class="si"><div class="sk">Power</div><div class="sv2">5V USB-C · ~1.2W</div></div>
+        <div class="si"><div class="sk">Sensitivity</div><div class="sv2 hi">−100 dBm typical</div></div>
+        <div class="si"><div class="sk">Total cost</div><div class="sv2">~$45 USD</div></div>
+      </div>
+
+      <div class="sec-lbl">Components</div>
+      <div class="comp"><span style="font-size:14px;flex-shrink:0">🍓</span><div><div class="cp">Raspberry Pi Zero 2W</div><div class="cd">Compute core. Runs Python scanner daemon, connects to WiFi, streams detections via MQTT → WebSocket. Quad-core ARM, 512MB RAM.</div></div></div>
+      <div class="comp"><span style="font-size:14px;flex-shrink:0">🔌</span><div><div class="cp">RTL-SDR v3 Dongle</div><div class="cd">SDR front-end using RTL2832U + R820T2. Converts RF → 8-bit IQ samples at up to 3.2 MS/s. Connected via USB OTG. Direct sampling mode covers 24 MHz (HF).</div></div></div>
+      <div class="comp"><span style="font-size:14px;flex-shrink:0">📶</span><div><div class="cp">Telescopic Whip Antenna (SMA)</div><div class="cd">Quarter-wave. Extend to 16.4 cm for PMR446, 17.3 cm for ISM-433. Replaceable with bandpass antenna for single-band selectivity.</div></div></div>
+
+      <div class="sec-lbl" style="margin-top:14px">Signal attribution — how it works</div>
+      <div class="flow">
+        <div class="fs"><div class="fn2">01</div><div class="ft">RF hits antenna</div></div><div class="fa">›</div>
+        <div class="fs"><div class="fn2">02</div><div class="ft">IQ samples</div></div><div class="fa">›</div>
+        <div class="fs"><div class="fn2">03</div><div class="ft">rtl_power sweep</div></div><div class="fa">›</div>
+        <div class="fs"><div class="fn2">04</div><div class="ft">RSSI threshold</div></div><div class="fa">›</div>
+        <div class="fs"><div class="fn2">05</div><div class="ft">Freq match → device</div></div><div class="fa">›</div>
+        <div class="fs"><div class="fn2">06</div><div class="ft">WS → dashboard</div></div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn primary" onclick="document.getElementById('sdr-modal').classList.add('hidden')">CLOSE</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════
+// CLOCK
+// ══════════════════════════════════════════════
+setInterval(()=>{document.getElementById('clock').textContent=new Date().toISOString().slice(11,19)+' UTC'},1000);
+
+// ══════════════════════════════════════════════
+// CONSTANTS
+// ══════════════════════════════════════════════
+const CH_FREQ={1:446.00625,2:446.01875,3:446.03125,4:446.04375,5:446.05625,6:446.06875,7:446.08125,8:446.09375};
+const ATTR_TOL=0.015; // ±15 kHz frequency matching tolerance
+
+const BAND_COL={PMR446:'#9b7ff4','FM-Radio':'#39d98a',VHF:'#4db8ff','UHF-Low':'#ff4e6a','UHF-High':'#ff7b8a','ISM-433':'#ffb347',Weather:'#00d4ff'};
+
+// ══════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════
+let ws=null, wsState='offline'; // offline | connecting | online | error
+let scanning=false;
+let scanCount=0, totalDetected=0;
+
+// Field
+let fieldNodes=[], connections=[], selected=null;
+let linkMode=false, linkSrc=null;
+let dragNode=null, dox=0, doy=0, nc=0, cc2=0;
+let editLinkId=null, editFreqNodeId=null;
+
+// Attribution history per registered device
+let deviceHistory={}; // nodeId → [{rssi, ts}]
+let lastDetected={}; // nodeId → {rssi, freq, ts}
+let unknownSignals=[]; // [{freq, rssi, band, ts}]
+
+// ══════════════════════════════════════════════
+// WEBSOCKET — REAL HARDWARE ONLY
+// ══════════════════════════════════════════════
+function toggleScan(){
+  if(wsState==='online'||wsState==='connecting'){
+    stopScan();
+  } else {
+    startScan();
+  }
+}
+
+function startScan(){
+  const url=document.getElementById('ws-url').value.trim();
+  if(!url) return;
+  wsState='connecting'; updateWsPill();
+  try{
+    ws=new WebSocket(url);
+  }catch(e){wsState='error';updateWsPill();return;}
+
+  ws.onopen=()=>{
+    wsState='online'; scanning=true;
+    updateWsPill(); updateCCState();
+    updateIntelBadge(true);
+    document.getElementById('no-hw').style.display='none';
+    setCCScanBtns('scanning');
+    // Start scan animation on all CHEMCHAM nodes
+    document.querySelectorAll('.cc-body').forEach(b=>b.classList.add('scanning'));
+  };
+
+  ws.onmessage=e=>{
+    try{
+      const msg=JSON.parse(e.data);
+      if(msg.type==='snapshot'||msg.type==='detections'){
+        const dets=msg.detections||[];
+        handleDetections(dets);
+        scanCount=msg.scans||scanCount+1;
+        document.getElementById('sc-scans').textContent=scanCount;
+      }
+    }catch(_){}
+  };
+
+  ws.onclose=()=>{wsState='offline';scanning=false;updateWsPill();updateCCState();updateIntelBadge(false);setCCScanBtns('idle');document.querySelectorAll('.cc-body').forEach(b=>b.classList.remove('scanning'));document.getElementById('no-hw').style.display='block';};
+  ws.onerror=()=>{wsState='error';};
+}
+
+function stopScan(){
+  if(ws) ws.close();
+  wsState='offline'; scanning=false;
+  updateWsPill(); updateCCState(); updateIntelBadge(false);
+  setCCScanBtns('idle');
+  document.querySelectorAll('.cc-body').forEach(b=>b.classList.remove('scanning'));
+}
+
+function updateWsPill(){
+  const pill=document.getElementById('ws-pill');
+  const txt=document.getElementById('ws-pill-txt');
+  pill.className='ws-pill '+wsState;
+  txt.textContent={offline:'OFFLINE',connecting:'CONNECTING...',online:'SCANNING',error:'ERROR'}[wsState]||'OFFLINE';
+}
+
+function updateCCState(){
+  const el=document.getElementById('cc-state');
+  if(scanning){el.className='cc-sc-state scanning';el.textContent='SCANNING';}
+  else{el.className='cc-sc-state offline';el.textContent='OFFLINE';}
+}
+
+function updateIntelBadge(live){
+  const b=document.getElementById('intel-badge');
+  b.className='intel-badge '+(live?'live':'off');
+  b.textContent=live?'LIVE':'OFFLINE';
+}
+
+function setCCScanBtns(state){
+  document.querySelectorAll('.cc-scan-btn').forEach(btn=>{
+    if(state==='scanning'){btn.classList.add('scanning');btn.innerHTML=`<div class="cc-scan-dot scanning"></div>SCANNING — CLICK TO STOP`;}
+    else{btn.classList.remove('scanning');btn.innerHTML=`<div class="cc-scan-dot off"></div>SCAN`;}
+  });
+}
+
+// ══════════════════════════════════════════════
+// SIGNAL ATTRIBUTION
+// ══════════════════════════════════════════════
+function handleDetections(dets){
+  if(!dets.length) return;
+  totalDetected+=dets.length;
+  document.getElementById('sc-detected').textContent=totalDetected;
+
+  // Build list of registered device frequencies
+  const registered=fieldNodes.filter(n=>n.type==='walkie'||n.type==='repeater'||n.type==='sensor')
+    .map(n=>({id:n.id,freq:CH_FREQ[n.channel||4],label:n.label}));
+
+  const newAttribIds=new Set();
+  const newUnknown=[];
+
+  dets.forEach(det=>{
+    // Try to attribute to a registered device
+    let match=null;
+    for(const reg of registered){
+      if(Math.abs(det.frequency-reg.freq)<=ATTR_TOL){match=reg;break;}
+    }
+    if(match){
+      // Attributed
+      if(!deviceHistory[match.id]) deviceHistory[match.id]=[];
+      deviceHistory[match.id].push({rssi:det.rssi,ts:Date.now()});
+      if(deviceHistory[match.id].length>60) deviceHistory[match.id].shift();
+      lastDetected[match.id]={rssi:det.rssi,freq:det.frequency,ts:Date.now()};
+      newAttribIds.add(match.id);
+      addLog(det.frequency,det.rssi,match.label,'attributed');
+    } else {
+      // Unknown
+      newUnknown.push(det);
+      addLog(det.frequency,det.rssi,det.band,'unknown');
+    }
+  });
+
+  document.getElementById('sc-attributed').textContent=Object.keys(lastDetected).filter(id=>(Date.now()-lastDetected[id].ts)<5000).length;
+
+  // Animate detected nodes
+  fieldNodes.forEach(n=>{
+    const body=document.getElementById(n.id+'-body');
+    const status=document.getElementById(n.id+'-status');
+    if(!body||!status) return;
+    const active=newAttribIds.has(n.id);
+    if(active){body.classList.add('detected');status.className='n-status det';}
+    else{body.classList.remove('detected');status.className='n-status';}
+  });
+
+  // Draw detection beams (green lines: CHEMCHAM → detected device)
+  drawDetectionBeams(newAttribIds);
+
+  // Update intelligence panel
+  updateRegCards();
+  updateUnknownCards(newUnknown);
+}
+
+// ══════════════════════════════════════════════
+// INTELLIGENCE PANEL — Registered Device Cards
+// ══════════════════════════════════════════════
+function updateRegCards(){
+  const registered=fieldNodes.filter(n=>n.type==='walkie'||n.type==='repeater'||n.type==='sensor');
+  const el=document.getElementById('reg-cards');
+  const sec=document.getElementById('sec-registered');
+
+  if(!registered.length){el.innerHTML='';sec.style.display='none';return;}
+  sec.style.display='block';
+
+  registered.forEach(node=>{
+    let card=document.getElementById('rcard-'+node.id);
+    const det=lastDetected[node.id];
+    const age=det?(Date.now()-det.ts):Infinity;
+    const active=age<5000;
+    const hist=deviceHistory[node.id]||[];
+    const rssi=det?det.rssi:null;
+    const rssiPct=rssi?Math.round(Math.max(0,Math.min(100,(rssi+100)/70*100))):0;
+
+    if(!card){
+      card=document.createElement('div');
+      card.id='rcard-'+node.id;
+      card.className='sig-card';
+      el.appendChild(card);
+    }
+    card.className='sig-card '+(active?'active':'silent');
+    card.innerHTML=`
+      <div class="sig-card-top">
+        <div class="sig-card-name">${node.label}</div>
+        <div class="sig-card-state ${active?'active':'silent'}">${active?'DETECTED':'SILENT'}</div>
+      </div>
+      <div class="sig-card-freq">CH${node.channel||4} · ${(CH_FREQ[node.channel||4]).toFixed(5)} MHz</div>
+      ${rssi!==null?`
+      <div class="rssi-row">
+        <div class="rssi-bar-bg"><div class="rssi-bar-fill" style="width:${rssiPct}%"></div></div>
+        <div class="rssi-val">${rssi} dBm</div>
+      </div>
+      <canvas class="sig-spark" id="spark-${node.id}" height="28"></canvas>
+      <div class="sig-meta">
+        <div class="sig-meta-item">Freq: <span>${det?det.freq.toFixed(5):'-'} MHz</span></div>
+        <div class="sig-meta-item">Last: <span>${active?Math.round(age/100)/10+'s ago':'—'}</span></div>
+      </div>`:`<div style="font-size:9px;color:var(--muted);padding:4px 0">No signal detected on this frequency</div>`}
+    `;
+
+    // Draw sparkline
+    if(hist.length>1){
+      const canvas=document.getElementById('spark-'+node.id);
+      if(canvas) drawSparkline(canvas,hist.map(h=>h.rssi));
+    }
+  });
+
+  // Remove cards for nodes that no longer exist
+  el.querySelectorAll('[id^="rcard-"]').forEach(card=>{
+    const nid=card.id.replace('rcard-','');
+    if(!registered.find(n=>n.id===nid)) card.remove();
+  });
+}
+
+function drawSparkline(canvas,values){
+  const W=canvas.offsetWidth*devicePixelRatio||200, H=28*devicePixelRatio;
+  canvas.width=W; canvas.height=H;
+  const ctx=canvas.getContext('2d');
+  ctx.clearRect(0,0,W,H);
+  const mn=Math.min(...values), mx=Math.max(...values), range=mx-mn||1;
+  ctx.beginPath();
+  ctx.strokeStyle='rgba(57,217,138,.6)';
+  ctx.lineWidth=1.5;
+  values.forEach((v,i)=>{
+    const x=(i/(values.length-1))*W;
+    const y=H-(((v-mn)/range)*(H-4)+2);
+    i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+}
+
+function updateUnknownCards(newUnk){
+  if(!newUnk.length) return;
+  const el=document.getElementById('unk-cards');
+  const sec=document.getElementById('sec-unknown');
+  sec.style.display='block';
+  el.innerHTML='';
+  // Deduplicate by band frequency bucket
+  const buckets={};
+  newUnk.forEach(d=>{
+    const key=d.band+'-'+Math.round(d.frequency*10);
+    if(!buckets[key]||d.rssi>buckets[key].rssi) buckets[key]=d;
+  });
+  Object.values(buckets).slice(0,8).forEach(d=>{
+    const col=BAND_COL[d.band]||'#6b7a8d';
+    const div=document.createElement('div');
+    div.className='unk-card';
+    div.innerHTML=`<div class="unk-dot" style="background:${col}"></div><div class="unk-freq">${d.frequency.toFixed(3)} MHz</div><div class="unk-rssi">${d.rssi}</div><div class="unk-band" style="border-color:${col}40;color:${col}">${d.band}</div>`;
+    el.appendChild(div);
+  });
+}
+
+// ══════════════════════════════════════════════
+// LOG
+// ══════════════════════════════════════════════
+function addLog(freq,rssi,who,type){
+  const el=document.getElementById('log-box');
+  const row=document.createElement('div');
+  row.className='log-row';
+  const col=type==='attributed'?'#39d98a':'#6b7a8d';
+  row.innerHTML=`<div class="lr-freq">${typeof freq==='number'?freq.toFixed(3):freq}</div><div class="lr-rssi">${rssi}</div><div class="lr-who" style="border-color:${col}40;color:${col}">${who}</div>`;
+  el.insertBefore(row,el.firstChild);
+  while(el.children.length>120) el.removeChild(el.lastChild);
+}
+
+// ══════════════════════════════════════════════
+// FIELD — NODES
+// ══════════════════════════════════════════════
+const DEV_META={
+  chemcham:{name:'CHEMCHAM',sub:'RTL-SDR · passive scanner'},
+  walkie:{icon:'📻',name:'Walkie-Talkie',sub:'PMR446 · FM'},
+  repeater:{icon:'🗼',name:'Repeater',sub:'VHF/UHF relay'},
+  sensor:{icon:'🌡️',name:'Env. Sensor',sub:'ISM-433'},
+};
+
+function startDrag(ev,type){ev.dataTransfer.setData('dtype',type);}
+function onDrop(ev){
+  ev.preventDefault();
+  const type=ev.dataTransfer.getData('dtype'); if(!type) return;
+  const rect=document.getElementById('field').getBoundingClientRect();
+  addNode(type, ev.clientX-rect.left-60, ev.clientY-rect.top-45);
+}
+
+function addNode(type,x,y){
+  const id='n'+(++nc);
+  const m=DEV_META[type]||DEV_META.walkie;
+  const label=m.name+(type!=='chemcham'?' #'+nc:'');
+  const el=document.createElement('div');
+  el.className='fn'; el.id=id;
+  el.style.left=Math.max(0,x)+'px';
+  el.style.top=Math.max(0,y)+'px';
+
+  if(type==='chemcham'){
+    el.innerHTML=`
+      <div class="cc-body" id="${id}-body">
+        <div class="cc-radar"></div>
+        <div class="cc-radar" style="animation-delay:.7s"></div>
+        <button class="cc-del" onclick="event.stopPropagation();removeNode('${id}')">✕</button>
+        <div class="cc-node-name">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><polygon points="7,1 13,4 13,10 7,13 1,10 1,4" stroke="#00ffcc" stroke-width="1" fill="rgba(0,255,204,.1)"/><circle cx="7" cy="7" r="2" fill="#00ffcc"/></svg>
+          CHEMCHAM
+        </div>
+        <div class="cc-node-sub">${m.sub}</div>
+        <button class="cc-scan-btn" onclick="event.stopPropagation();toggleScan()">
+          <div class="cc-scan-dot off"></div>SCAN
+        </button>
+        <div class="cc-status" id="${id}-cstate">Not scanning — click SCAN</div>
+        <div style="display:flex;gap:3px;margin-top:6px">
+          <button class="na" style="flex:1" onclick="event.stopPropagation();document.getElementById('sdr-modal').classList.remove('hidden')">DEVICE INFO</button>
+        </div>
+      </div>`;
+  } else {
+    const defaultCh=Math.ceil(Math.random()*8);
+    el.innerHTML=`
+      <div class="node-body" id="${id}-body">
+        <div class="n-status" id="${id}-status"></div>
+        <span class="n-icon">${m.icon}</span>
+        <div class="n-name">${m.name} <span style="color:var(--muted)">#${nc}</span></div>
+        <div class="n-sub">${m.sub}</div>
+        <div class="n-freq" id="${id}-freq">CH${defaultCh} · ${CH_FREQ[defaultCh].toFixed(5)} MHz</div>
+        <div class="n-acts">
+          <button class="na" onclick="event.stopPropagation();openFreqModal('${id}')">SET FREQ</button>
+          <button class="na" onclick="event.stopPropagation();startLinkFrom('${id}')">LINK</button>
+          <button class="na del" onclick="event.stopPropagation();removeNode('${id}')">DEL</button>
+        </div>
+      </div>`;
+    // Store default channel on the node object
+    fieldNodes.push({id,type,label,x,y,el,channel:defaultCh});
+    selectNode(id);
+    document.getElementById('dh').style.display='none';
+    el.addEventListener('mousedown',nodeMouseDown);
+    document.getElementById('field').appendChild(el);
+    updateRegCards();
+    return;
+  }
+
+  fieldNodes.push({id,type,label,x,y,el,channel:null});
+  selectNode(id);
+  document.getElementById('dh').style.display='none';
+  el.addEventListener('mousedown',nodeMouseDown);
+  document.getElementById('field').appendChild(el);
+
+  // If chemcham, update its state display
+  if(type==='chemcham') updateCCState();
+}
+
+function nodeMouseDown(ev){
+  if(ev.target.tagName==='BUTTON') return;
+  const el=ev.currentTarget;
+  const id=el.id;
+  if(linkMode){handleLinkTap(id);return;}
+  selectNode(id);
+  dragNode=id;
+  const fr=document.getElementById('field').getBoundingClientRect();
+  dox=ev.clientX-fr.left-parseFloat(el.style.left);
+  doy=ev.clientY-fr.top-parseFloat(el.style.top);
+  ev.preventDefault();
+}
+
+function onMouseMove(ev){
+  if(!dragNode) return;
+  const fr=document.getElementById('field').getBoundingClientRect();
+  const x=Math.max(0,ev.clientX-fr.left-dox);
+  const y=Math.max(0,ev.clientY-fr.top-doy);
+  const el=document.getElementById(dragNode);
+  if(el){el.style.left=x+'px';el.style.top=y+'px';}
+  const n=fieldNodes.find(n=>n.id===dragNode);
+  if(n){n.x=x;n.y=y;}
+  redrawSVG();
+}
+document.addEventListener('mouseup',()=>{dragNode=null;});
+
+function onFieldBg(ev){
+  if(ev.target.id==='field'||ev.target.id==='fsvg'){
+    deselect();
+    if(linkMode) cancelLink();
+  }
+}
+
+function selectNode(id){
+  deselect(); selected=id;
+  const b=document.getElementById(id+'-body');
+  if(b) b.classList.add('selected');
+}
+function deselect(){
+  selected=null;
+  document.querySelectorAll('.node-body.selected,.cc-body.selected').forEach(e=>e.classList.remove('selected'));
+}
+function removeNode(id){
+  connections=connections.filter(c=>c.a!==id&&c.b!==id);
+  fieldNodes=fieldNodes.filter(n=>n.id!==id);
+  delete lastDetected[id]; delete deviceHistory[id];
+  const el=document.getElementById(id); if(el) el.remove();
+  redrawSVG(); updateRegCards();
+  if(!fieldNodes.length) document.getElementById('dh').style.display='flex';
+}
+function removeSelected(){if(selected)removeNode(selected);}
+function clearAll(){
+  fieldNodes.forEach(n=>n.el.remove()); fieldNodes=[]; connections=[];
+  lastDetected={}; deviceHistory={};
+  document.getElementById('fsvg').innerHTML='';
+  document.querySelectorAll('.cl').forEach(e=>e.remove());
+  document.getElementById('dh').style.display='flex';
+  selected=null; updateRegCards();
+}
+function autoArrange(){
+  const n=fieldNodes.length; if(!n) return;
+  const f=document.getElementById('field');
+  const W=f.offsetWidth, H=f.offsetHeight;
+  const cx=W/2, cy=H/2, r=Math.min(W,H)*.3;
+  fieldNodes.forEach((node,i)=>{
+    const a=(i/n)*Math.PI*2-Math.PI/2;
+    node.x=cx+r*Math.cos(a)-60; node.y=cy+r*Math.sin(a)-45;
+    node.el.style.left=node.x+'px'; node.el.style.top=node.y+'px';
+  });
+  redrawSVG();
+}
+
+// ══════════════════════════════════════════════
+// LINK MODE
+// ══════════════════════════════════════════════
+function toggleLink(){
+  if(linkMode){cancelLink();return;}
+  linkMode=true; linkSrc=null;
+  const b=document.getElementById('btn-link');
+  b.classList.add('tb-link-active'); b.textContent='CANCEL LINK';
+  document.getElementById('tb-hint').textContent='Click first device then second to create an RF link';
+}
+function startLinkFrom(id){if(!linkMode)toggleLink();handleLinkTap(id);}
+function handleLinkTap(id){
+  if(!linkSrc){
+    linkSrc=id;
+    document.getElementById(id).classList.add('lk-src');
+    document.getElementById('tb-hint').textContent='Now click second device';
+  } else if(linkSrc!==id){
+    makeLink(linkSrc,id); cancelLink();
+  }
+}
+function cancelLink(){
+  linkMode=false; linkSrc=null;
+  document.querySelectorAll('.lk-src').forEach(e=>e.classList.remove('lk-src'));
+  const b=document.getElementById('btn-link');
+  b.classList.remove('tb-link-active'); b.textContent='LINK DEVICES';
+  document.getElementById('tb-hint').textContent='Drag CHEMCHAM from the left · then add field devices';
+}
+function makeLink(a,b){
+  if(connections.find(c=>(c.a===a&&c.b===b)||(c.a===b&&c.b===a))) return;
+  const id='c'+(++cc2);
+  connections.push({id,a,b,channel:4,mode:'simplex',powerMw:500,distM:300});
+  redrawSVG(); openLinkModal(id);
+}
+
+// ══════════════════════════════════════════════
+// SVG — Connections + Detection beams
+// ══════════════════════════════════════════════
+function nodeCenter(id){
+  const el=document.getElementById(id); if(!el) return{x:0,y:0};
+  return{x:parseFloat(el.style.left)+el.offsetWidth/2, y:parseFloat(el.style.top)+el.offsetHeight/2};
+}
+
+let detectionBeams=new Set(); // set of nodeIds currently detected
+
+function drawDetectionBeams(detectedIds){
+  detectionBeams=detectedIds;
+  redrawSVG();
+}
+
+function redrawSVG(){
+  const svg=document.getElementById('fsvg'); svg.innerHTML='';
+  document.querySelectorAll('.cl').forEach(e=>e.remove());
+  const len=Math.sqrt; // just reuse
+
+  // ── Connection links (purple dashed) ──
+  connections.forEach(conn=>{
+    const a=nodeCenter(conn.a), b=nodeCenter(conn.b);
+    const dx=b.x-a.x, dy=b.y-a.y, d=Math.sqrt(dx*dx+dy*dy)||1;
+    const mx=(a.x+b.x)/2, my=(a.y+b.y)/2;
+    const nx=-dy/d*22, ny=dx/d*22;
+
+    const dash=makePath(`M${a.x},${a.y} Q${mx+nx},${my+ny} ${b.x},${b.y}`,'rgba(155,127,244,.18)','1.5','5 4');
+    const dot=makePath(`M${a.x},${a.y} Q${mx+nx},${my+ny} ${b.x},${b.y}`,'rgba(155,127,244,.7)','2','10 '+(d+40));
+    dot.innerHTML=`<animate attributeName="stroke-dashoffset" from="${d+50}" to="-20" dur="1.1s" repeatCount="indefinite"/>`;
+    svg.appendChild(dash); svg.appendChild(dot);
+
+    const lbl=document.createElement('div');
+    lbl.className='cl';
+    lbl.style.left=(mx+nx-26)+'px'; lbl.style.top=(my+ny-10)+'px';
+    lbl.innerHTML=`<div class="cb" onclick="openLinkModal('${conn.id}')">CH${conn.channel} · ${conn.distM}m</div>`;
+    document.getElementById('field').appendChild(lbl);
+  });
+
+  // ── Detection beams (green: CHEMCHAM → detected device) ──
+  const chemchams=fieldNodes.filter(n=>n.type==='chemcham');
+  if(chemchams.length&&detectionBeams.size){
+    const cc=chemchams[0]; // use first CHEMCHAM
+    const ccC=nodeCenter(cc.id);
+    detectionBeams.forEach(nodeId=>{
+      const tc=nodeCenter(nodeId);
+      const dx=tc.x-ccC.x, dy=tc.y-ccC.y, d=Math.sqrt(dx*dx+dy*dy)||1;
+
+      // Glow beam
+      const beam=document.createElementNS('http://www.w3.org/2000/svg','line');
+      beam.setAttribute('x1',ccC.x); beam.setAttribute('y1',ccC.y);
+      beam.setAttribute('x2',tc.x); beam.setAttribute('y2',tc.y);
+      beam.setAttribute('stroke','rgba(57,217,138,.18)');
+      beam.setAttribute('stroke-width','4'); beam.setAttribute('fill','none');
+      svg.appendChild(beam);
+
+      // Animated signal dot
+      const sig=document.createElementNS('http://www.w3.org/2000/svg','line');
+      sig.setAttribute('x1',ccC.x); sig.setAttribute('y1',ccC.y);
+      sig.setAttribute('x2',tc.x); sig.setAttribute('y2',tc.y);
+      sig.setAttribute('stroke','rgba(57,217,138,.9)');
+      sig.setAttribute('stroke-width','1.5');
+      sig.setAttribute('stroke-dasharray',`8 ${d+30}`);
+      sig.setAttribute('fill','none');
+      sig.innerHTML=`<animate attributeName="stroke-dashoffset" from="${d+40}" to="-20" dur="0.8s" repeatCount="indefinite"/>`;
+      svg.appendChild(sig);
+    });
+  }
+}
+
+function makePath(d,stroke,sw,da){
+  const p=document.createElementNS('http://www.w3.org/2000/svg','path');
+  p.setAttribute('d',d); p.setAttribute('stroke',stroke);
+  p.setAttribute('stroke-width',sw); p.setAttribute('stroke-dasharray',da);
+  p.setAttribute('fill','none'); p.setAttribute('stroke-linecap','round');
+  return p;
+}
+
+// ══════════════════════════════════════════════
+// MODALS — Frequency Config
+// ══════════════════════════════════════════════
+function openFreqModal(nodeId){
+  editFreqNodeId=nodeId;
+  const node=fieldNodes.find(n=>n.id===nodeId);
+  if(!node) return;
+  document.getElementById('fc-ch').value=node.channel||4;
+  updateFreqHint();
+  document.getElementById('freq-modal').classList.remove('hidden');
+}
+function closeFreqModal(){document.getElementById('freq-modal').classList.add('hidden');editFreqNodeId=null;}
+function updateFreqHint(){
+  const ch=document.getElementById('fc-ch').value;
+  document.getElementById('freq-hint').textContent=
+    `CHEMCHAM will listen for signals within ±15 kHz of ${CH_FREQ[ch].toFixed(5)} MHz and attribute them to this device.`;
+}
+function applyFreqConfig(){
+  const node=fieldNodes.find(n=>n.id===editFreqNodeId); if(!node) return;
+  const ch=parseInt(document.getElementById('fc-ch').value);
+  node.channel=ch;
+  const frel=document.getElementById(editFreqNodeId+'-freq');
+  if(frel) frel.textContent=`CH${ch} · ${CH_FREQ[ch].toFixed(5)} MHz`;
+  updateRegCards();
+  closeFreqModal();
+}
+
+// ══════════════════════════════════════════════
+// MODALS — Link Config
+// ══════════════════════════════════════════════
+function openLinkModal(id){
+  editLinkId=id;
+  const c=connections.find(x=>x.id===id); if(!c) return;
+  document.getElementById('lc-ch').value=c.channel;
+  const pi={100:1,200:2,500:3,1000:4,5000:5}[c.powerMw]||3;
+  document.getElementById('lc-pw').value=pi;
+  document.getElementById('lc-pw-v').textContent=['100mW','200mW','500mW','1W','5W'][pi-1];
+  document.getElementById('lc-dist').value=c.distM;
+  document.getElementById('lc-dist-v').textContent=c.distM+'m';
+  document.querySelectorAll('.cfr').forEach(r=>r.classList.remove('sel'));
+  document.querySelectorAll('.cfr')[0].classList.add('sel');
+  refreshLinkStatus();
+  document.getElementById('link-modal').classList.remove('hidden');
+}
+function closeLinkModal(){document.getElementById('link-modal').classList.add('hidden');editLinkId=null;}
+function refreshLinkStatus(){
+  const ch=parseInt(document.getElementById('lc-ch').value)||4;
+  const freq=CH_FREQ[ch];
+  const pw={1:100,2:200,3:500,4:1000,5:5000}[document.getElementById('lc-pw').value]||500;
+  const dist=document.getElementById('lc-dist').value;
+  const fspl=-20*Math.log10(+dist)-20*Math.log10(freq)-20*Math.log10(4*Math.PI/300)+10*Math.log10(pw/1000);
+  const rssi=Math.max(-100,Math.min(-30,Math.round(fspl)));
+  document.getElementById('lc-live-txt').textContent=`Active · CH${ch} · ${freq.toFixed(5)} MHz · ${rssi} dBm · ${dist}m`;
+}
+function pickMode(el){
+  document.querySelectorAll('.cfr').forEach(r=>r.classList.remove('sel'));
+  el.classList.add('sel');
+}
+function applyLink(){
+  const c=connections.find(x=>x.id===editLinkId); if(!c) return;
+  c.channel=parseInt(document.getElementById('lc-ch').value);
+  c.powerMw={1:100,2:200,3:500,4:1000,5:5000}[document.getElementById('lc-pw').value]||500;
+  c.distM=parseInt(document.getElementById('lc-dist').value);
+  redrawSVG(); closeLinkModal();
+}
+function deleteLink(){
+  connections=connections.filter(x=>x.id!==editLinkId);
+  redrawSVG(); closeLinkModal();
+}
+
+// ══════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════
+updateWsPill();
+updateCCState();
+updateIntelBadge(false);
+</script>
+</body>
+</html>
