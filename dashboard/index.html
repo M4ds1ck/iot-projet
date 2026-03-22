@@ -2432,17 +2432,27 @@ function initSocketSync(){
   });
 
   socket.on('client_registered',payload=>{
-    if(!S.fieldHydrated&&payload?.topology&&Object.keys(payload.topology.devices||{}).length){S.fieldHydrated=true;restoreTopology(payload.topology);}
+    if(!S.fieldHydrated&&payload?.topology&&Object.keys(payload.topology.devices||{}).length){
+      S.fieldHydrated=true;
+      restoreTopology(payload.topology,{preserveSelection:true,persistLocal:false});
+    }
     setPeerSnapshot(payload?.peers||[]);
     if(payload?.peer) upsertPeerWalkie(payload.peer);
   });
   socket.on('peer_snapshot',setPeerSnapshot);
   socket.on('field_state',payload=>{
-    if(!S.fieldHydrated&&payload?.topology&&Object.keys(payload.topology.devices||{}).length){S.fieldHydrated=true;restoreTopology(payload.topology);}
+    if(!S.fieldHydrated&&payload?.topology&&Object.keys(payload.topology.devices||{}).length){
+      S.fieldHydrated=true;
+      restoreTopology(payload.topology,{preserveSelection:true,persistLocal:false});
+    }
     setPeerSnapshot(payload?.peers||[]);
   });
   socket.on('topology_updated',payload=>{
-    if(payload?.topology&&!S.scanningSet.size&&S.mode!=='connect'){S.fieldHydrated=true;restoreTopology(payload.topology);}
+    const topo=payload?.topology;
+    if(!topo||S.scanningSet.size||S.mode==='connect') return;
+    if(topo.updated_by&&topo.updated_by===myClientId) return;
+    S.fieldHydrated=true;
+    restoreTopology(topo,{preserveSelection:true,persistLocal:false});
   });
   socket.on('walkie_state',state=>{
     const dev=peerWalkieByClient(state.clientId);
@@ -3748,7 +3758,10 @@ document.getElementById('file-in').onchange=e=>{
   r.onload=ev=>{try{restoreTopology(JSON.parse(ev.target.result));}catch(err){alert('Invalid file: '+err.message);}};
   r.readAsText(f);e.target.value='';
 };
-function restoreTopology(data){
+function restoreTopology(data,opts={}){
+  const options={preserveSelection:false,persistLocal:true,...opts};
+  const prevSelected=options.preserveSelection?S.selected:null;
+  const prevTab=options.preserveSelection?S.inspTab:'info';
   clearTopology();
   S.nextId=data.nextId||1;
   for(const d of Object.values(data.devices||{})){
@@ -3758,7 +3771,12 @@ function restoreTopology(data){
   for(const lk of Object.values(data.links||{})){
     if(S.devices[lk.a]&&S.devices[lk.b]) addLink(lk.a,lk.b,lk.type);
   }
-  persist();
+  if(options.preserveSelection&&prevSelected&&S.devices[prevSelected]){
+    S.inspTab=prevTab;
+    selectDevice(prevSelected);
+  }
+  if(options.persistLocal) persist();
+  else {syncEmpty();syncCounts();}
 }
 
 /* ── GitHub Panel ── */
