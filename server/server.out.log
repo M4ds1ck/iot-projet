@@ -1,0 +1,7 @@
+CHEMCHAM IoT RF Server
+  Dashboard: http://localhost:5000/
+  Listen:    http://0.0.0.0:5000
+  DB:        C:\Users\mahmo\iot-sdr\server\signals.db
+  SocketIO:  threading
+ * Serving Flask app 'server'
+ * Debug mode: off

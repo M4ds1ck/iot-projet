@@ -40,6 +40,10 @@ DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "").strip()
 MAX_LIVE_HISTORY = int(os.getenv("MAX_LIVE_HISTORY", "500"))
 ALERT_COOLDOWN_SEC = float(os.getenv("ALERT_COOLDOWN_SEC", "30"))
+SOCKETIO_ASYNC_MODE = os.getenv(
+    "SOCKETIO_ASYNC_MODE",
+    "threading" if os.name == "nt" else "eventlet",
+)
 
 HEARTBEAT_INTERVAL_SEC = 10
 HEARTBEAT_TIMEOUT_SEC = HEARTBEAT_INTERVAL_SEC * 3
@@ -50,7 +54,7 @@ CORS(app)
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
-    async_mode="eventlet",
+    async_mode=SOCKETIO_ASYNC_MODE,
     logger=False,
     engineio_logger=False,
 )
@@ -1270,6 +1274,10 @@ CHEMCHAM IoT RF Server
   Dashboard: http://localhost:{PORT}/
   Listen:    http://{HOST}:{PORT}
   DB:        {DB_PATH}
+  SocketIO:  {socketio.async_mode}
         """.strip()
     )
-    socketio.run(app, host=HOST, port=PORT, debug=DEBUG)
+    run_kwargs: dict[str, Any] = {"host": HOST, "port": PORT, "debug": DEBUG}
+    if socketio.async_mode == "threading":
+        run_kwargs["allow_unsafe_werkzeug"] = True
+    socketio.run(app, **run_kwargs)
