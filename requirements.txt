@@ -1,11 +1,8 @@
-# Device requirements
+flask>=3.0
+flask-socketio>=5.3
+flask-cors>=4.0
+eventlet>=0.35
+requests>=2.31
+numpy>=1.26
+scipy>=1.12
 pyrtlsdr>=0.3.0
-numpy>=1.24.0
-scipy>=1.10.0
-websocket-client>=1.6.0
-
-# Server requirements
-flask>=3.0.0
-flask-socketio>=5.3.0
-flask-cors>=4.0.0
-eventlet>=0.35.0
