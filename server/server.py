@@ -1,341 +1,462 @@
+#!/usr/bin/env python3
 """
-IoT SDR Backend Server
-Bridges MQTT → WebSocket → Dashboard
-Also provides REST API for history and config.
+IoT RF Signal Scanner - Enhanced Server
+=========================================
+Flask + Flask-SocketIO server that:
+  • Receives scan results from device(s) over WebSocket
+  • Persists signal history in SQLite
+  • Serves the dashboard HTML
+  • Provides a REST API for history queries
+  • Runs an alert engine for threshold violations
 
-Usage:
-  python server.py              # connects to MQTT broker
-  python server.py --simulate   # generates its own fake data (no Pi needed)
-
-Endpoints:
-  WS  ws://localhost:8765          — live signal stream
-  GET http://localhost:8766/api/signals    — recent detections (JSON)
-  GET http://localhost:8766/api/stats      — summary stats
-  GET http://localhost:8766/api/config     — scanner config
-  PUT http://localhost:8766/api/config     — update config (pushed to scanner)
+Dependencies:
+    pip install flask flask-socketio flask-cors eventlet
 """
 
-import argparse
-import asyncio
 import json
-import logging
-import math
-import random
+import sqlite3
+import threading
 import time
-from collections import deque
-from datetime import datetime
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from threading import Thread
+import os
+from datetime import datetime, timedelta
+from typing import Optional
 
-import websockets
+from flask import Flask, jsonify, request, send_from_directory, abort
+from flask_socketio import SocketIO, emit, join_room
+from flask_cors import CORS
 
-try:
-    import paho.mqtt.client as mqtt
-    MQTT_AVAILABLE = True
-except ImportError:
-    MQTT_AVAILABLE = False
+# ─── App setup ───────────────────────────────────────────────────────────────
+BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
+DB_PATH   = os.path.join(BASE_DIR, "signals.db")
+DASH_DIR  = os.path.join(BASE_DIR, "..", "dashboard")
 
-# ──────────────────────────────────────────────
-# Configuration
-# ──────────────────────────────────────────────
+app = Flask(__name__, static_folder=DASH_DIR)
+CORS(app)
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode="eventlet",
+    logger=False,
+    engineio_logger=False,
+)
 
-WS_HOST        = "0.0.0.0"
-WS_PORT        = 8765
-HTTP_HOST      = "0.0.0.0"
-HTTP_PORT      = 8766
-MQTT_BROKER    = "localhost"
-MQTT_PORT      = 1883
-MQTT_TOPIC     = "sdr/detections"
-HISTORY_SIZE   = 500   # max detections kept in memory
+# ─── In-memory state (last N scans) ──────────────────────────────────────────
+MAX_LIVE_HISTORY = 300          # scans kept in RAM
+live_history: list[dict] = []
+live_lock = threading.Lock()
 
-# Mutable scanner config (can be updated via API)
-SCANNER_CONFIG = {
-    "bands":          ["PMR446", "VHF", "UHF-Low", "UHF-High", "ISM-433", "FM-Radio", "Weather"],
-    "rssi_threshold": -85,
-    "scan_interval":  1.0,
-    "gain":           40,
-    "simulate":       False,
-}
+# ─── Alert thresholds ────────────────────────────────────────────────────────
+ALERTS: list[dict] = []
+ALERT_LOG: list[dict] = []
+MAX_ALERT_LOG = 500
 
-# ──────────────────────────────────────────────
-# Shared state
-# ──────────────────────────────────────────────
+DEFAULT_ALERTS = [
+    {"id": "a1", "name": "Strong PMR446 signal",  "band": "PMR446",
+     "threshold_db": -50, "active": True},
+    {"id": "a2", "name": "Any FRS/GMRS activity", "band": "FRS",
+     "threshold_db": -70, "active": True},
+    {"id": "a3", "name": "High noise floor",       "band": None,
+     "metric": "noise_floor", "threshold_db": -80, "active": True},
+]
+ALERTS.extend(DEFAULT_ALERTS)
 
-_ws_clients:   set  = set()
-_signal_history: deque = deque(maxlen=HISTORY_SIZE)
-_band_stats: dict   = {}   # band → {count, last_rssi, last_seen}
-_scan_count: int    = 0
 
-def _update_band_stats(detections: list):
-    global _scan_count
-    _scan_count += 1
-    for d in detections:
-        band = d.get("band", "Unknown")
-        if band not in _band_stats:
-            _band_stats[band] = {"count": 0, "last_rssi": -999, "last_seen": None}
-        _band_stats[band]["count"]     += 1
-        _band_stats[band]["last_rssi"]  = d.get("rssi", -99)
-        _band_stats[band]["last_seen"]  = d.get("timestamp")
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DATABASE
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# ──────────────────────────────────────────────
-# WebSocket server
-# ──────────────────────────────────────────────
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS scans (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_id     INTEGER,
+            timestamp   TEXT,
+            mode        TEXT,
+            total_sigs  INTEGER,
+            wt_active   INTEGER,
+            payload     TEXT
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS signals (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_db_id  INTEGER,
+            timestamp   TEXT,
+            freq_mhz    REAL,
+            power_db    REAL,
+            snr_db      REAL,
+            band        TEXT,
+            channel     INTEGER,
+            modulation  TEXT,
+            is_wt       INTEGER,
+            confirmed   INTEGER
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS alert_log (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp   TEXT,
+            alert_id    TEXT,
+            alert_name  TEXT,
+            freq_mhz    REAL,
+            power_db    REAL,
+            band        TEXT,
+            channel     INTEGER
+        )
+    """)
+    conn.commit()
+    conn.close()
 
-async def ws_handler(websocket):
-    _ws_clients.add(websocket)
-    client_addr = websocket.remote_address
-    logging.info(f"Dashboard connected: {client_addr} "
-                 f"(total: {len(_ws_clients)})")
 
-    # Send current history immediately on connect
-    snapshot = {
-        "type":    "snapshot",
-        "history": list(_signal_history)[-100:],  # last 100
-        "stats":   _band_stats,
-        "config":  SCANNER_CONFIG,
-        "scans":   _scan_count,
-    }
+def db_insert_scan(data: dict) -> int:
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO scans (scan_id, timestamp, mode, total_sigs, wt_active, payload)
+        VALUES (?,?,?,?,?,?)
+    """, (
+        data.get("scan_id"),
+        data.get("timestamp"),
+        data.get("mode"),
+        data.get("total_signals", 0),
+        data.get("wt_active", 0),
+        json.dumps(data),
+    ))
+    scan_db_id = c.lastrowid
+
+    for sig in data.get("all_signals", []):
+        if not sig.get("confirmed"):
+            continue
+        c.execute("""
+            INSERT INTO signals
+            (scan_db_id, timestamp, freq_mhz, power_db, snr_db,
+             band, channel, modulation, is_wt, confirmed)
+            VALUES (?,?,?,?,?,?,?,?,?,?)
+        """, (
+            scan_db_id,
+            data.get("timestamp"),
+            sig.get("freq_mhz"),
+            sig.get("power_db"),
+            sig.get("snr_db"),
+            sig.get("band"),
+            sig.get("channel"),
+            sig.get("modulation"),
+            1 if sig.get("is_walkie_talkie") else 0,
+            1,
+        ))
+    conn.commit()
+    conn.close()
+    return scan_db_id
+
+
+def db_insert_alert(alert_data: dict):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""
+        INSERT INTO alert_log
+        (timestamp, alert_id, alert_name, freq_mhz, power_db, band, channel)
+        VALUES (?,?,?,?,?,?,?)
+    """, (
+        alert_data["timestamp"],
+        alert_data["alert_id"],
+        alert_data["alert_name"],
+        alert_data.get("freq_mhz"),
+        alert_data.get("power_db"),
+        alert_data.get("band"),
+        alert_data.get("channel"),
+    ))
+    conn.commit()
+    conn.close()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ALERT ENGINE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Cooldown: don't re-fire the same alert within 30 s
+_alert_cooldown: dict[str, float] = {}
+COOLDOWN_SEC = 30.0
+
+
+def check_alerts(scan_data: dict):
+    now = time.time()
+    fired = []
+
+    for rule in ALERTS:
+        if not rule.get("active"):
+            continue
+        key = rule["id"]
+        if now - _alert_cooldown.get(key, 0) < COOLDOWN_SEC:
+            continue
+
+        # Band-specific signal threshold
+        if rule.get("band"):
+            band_data = scan_data.get("bands", {}).get(rule["band"], {})
+            for sig in band_data.get("active", []):
+                if sig.get("power_db", -999) >= rule["threshold_db"]:
+                    ev = {
+                        "timestamp":  datetime.utcnow().isoformat() + "Z",
+                        "alert_id":   key,
+                        "alert_name": rule["name"],
+                        "freq_mhz":   sig.get("freq_mhz"),
+                        "power_db":   sig.get("power_db"),
+                        "band":       rule["band"],
+                        "channel":    sig.get("channel"),
+                    }
+                    _alert_cooldown[key] = now
+                    fired.append(ev)
+                    ALERT_LOG.append(ev)
+                    db_insert_alert(ev)
+                    if len(ALERT_LOG) > MAX_ALERT_LOG:
+                        ALERT_LOG.pop(0)
+                    break
+
+        # Noise floor threshold
+        elif rule.get("metric") == "noise_floor":
+            for band_name, nf in scan_data.get("noise_floors", {}).items():
+                if nf >= rule["threshold_db"]:
+                    ev = {
+                        "timestamp":  datetime.utcnow().isoformat() + "Z",
+                        "alert_id":   key,
+                        "alert_name": rule["name"] + f" ({band_name})",
+                        "power_db":   nf,
+                        "band":       band_name,
+                    }
+                    _alert_cooldown[key] = now
+                    fired.append(ev)
+                    ALERT_LOG.append(ev)
+                    db_insert_alert(ev)
+                    break
+
+    if fired:
+        socketio.emit("alerts", fired, room="dashboard")
+
+    return fired
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  WEBSOCKET EVENTS  (device → server)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@socketio.on("connect")
+def on_connect():
+    print(f"[WS] Client connected: {request.sid}")
+
+
+@socketio.on("disconnect")
+def on_disconnect():
+    print(f"[WS] Client disconnected: {request.sid}")
+
+
+@socketio.on("join")
+def on_join(data):
+    room = data.get("room", "dashboard")
+    join_room(room)
+    print(f"[WS] {request.sid} joined room '{room}'")
+
+
+@socketio.on("scan_result")
+def on_scan_result(data: dict):
+    """Receive a scan payload from the device."""
     try:
-        await websocket.send(json.dumps(snapshot))
-    except Exception:
-        pass
+        # Persist
+        db_insert_scan(data)
 
-    try:
-        async for raw in websocket:
-            msg = json.loads(raw)
-            if msg.get("type") == "config_update":
-                SCANNER_CONFIG.update(msg.get("config", {}))
-                logging.info(f"Config updated: {SCANNER_CONFIG}")
-                # Broadcast config change to all clients
-                await broadcast({"type": "config", "config": SCANNER_CONFIG})
-    except websockets.exceptions.ConnectionClosed:
-        pass
-    finally:
-        _ws_clients.discard(websocket)
-        logging.info(f"Dashboard disconnected: {client_addr} "
-                     f"(total: {len(_ws_clients)})")
+        # Update live history
+        with live_lock:
+            live_history.append(data)
+            if len(live_history) > MAX_LIVE_HISTORY:
+                live_history.pop(0)
 
-async def broadcast(payload: dict):
-    if not _ws_clients:
-        return
-    msg = json.dumps(payload)
-    disconnected = set()
-    for ws in list(_ws_clients):
-        try:
-            await ws.send(msg)
-        except Exception:
-            disconnected.add(ws)
-    _ws_clients.difference_update(disconnected)
+        # Check alerts
+        alerts = check_alerts(data)
 
-async def push_detections(detections: list):
-    """Store detections and push to all dashboard clients."""
-    _signal_history.extend(detections)
-    _update_band_stats(detections)
+        # Broadcast to all dashboard clients
+        socketio.emit("scan_update", data, room="dashboard")
 
-    await broadcast({
-        "type":       "detections",
-        "timestamp":  datetime.utcnow().isoformat() + "Z",
-        "detections": detections,
-        "stats":      _band_stats,
-        "scans":      _scan_count,
+    except Exception as e:
+        print(f"[ERROR] on_scan_result: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  REST API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/status")
+def api_status():
+    with live_lock:
+        last = live_history[-1] if live_history else None
+    return jsonify({
+        "status": "ok",
+        "scans_in_memory": len(live_history),
+        "last_scan_ts": last["timestamp"] if last else None,
+        "wt_active": last["wt_active"] if last else 0,
     })
 
-# ──────────────────────────────────────────────
-# MQTT bridge
-# ──────────────────────────────────────────────
 
-_loop: asyncio.AbstractEventLoop = None
+@app.route("/api/latest")
+def api_latest():
+    with live_lock:
+        if not live_history:
+            return jsonify({}), 204
+        return jsonify(live_history[-1])
 
-def mqtt_on_message(client, userdata, msg):
-    try:
-        payload = json.loads(msg.payload)
-        dets    = payload.get("detections", [])
-        if dets and _loop:
-            asyncio.run_coroutine_threadsafe(push_detections(dets), _loop)
-    except Exception as e:
-        logging.error(f"MQTT parse error: {e}")
 
-def start_mqtt():
-    if not MQTT_AVAILABLE:
-        logging.warning("paho-mqtt not available — MQTT disabled")
-        return
-    client = mqtt.Client()
-    client.on_message = mqtt_on_message
-    try:
-        client.connect(MQTT_BROKER, MQTT_PORT)
-        client.subscribe(MQTT_TOPIC)
-        client.loop_forever()
-    except Exception as e:
-        logging.warning(f"MQTT bridge failed: {e}")
+@app.route("/api/history")
+def api_history():
+    """Return last N scans (default 60) with summary only."""
+    n = min(int(request.args.get("n", 60)), 300)
+    with live_lock:
+        subset = live_history[-n:]
+    summaries = [
+        {
+            "scan_id":       s.get("scan_id"),
+            "timestamp":     s.get("timestamp"),
+            "total_signals": s.get("total_signals"),
+            "wt_active":     s.get("wt_active"),
+            "noise_floors":  s.get("noise_floors"),
+        }
+        for s in subset
+    ]
+    return jsonify(summaries)
 
-# ──────────────────────────────────────────────
-# Simulation mode (no Pi needed)
-# ──────────────────────────────────────────────
 
-SIM_TRANSMITTERS = [
-    {"freq": 446.00625, "rssi": -62, "band": "PMR446",   "mod": "FM",  "drift": 0.4},
-    {"freq": 446.01875, "rssi": -74, "band": "PMR446",   "mod": "FM",  "drift": 0.6},
-    {"freq": 162.400,   "rssi": -55, "band": "Weather",  "mod": "FM",  "drift": 0.1},
-    {"freq": 96.5,      "rssi": -45, "band": "FM-Radio", "mod": "FM",  "drift": 0.05},
-    {"freq": 101.1,     "rssi": -48, "band": "FM-Radio", "mod": "FM",  "drift": 0.05},
-    {"freq": 433.920,   "rssi": -71, "band": "ISM-433",  "mod": "FM",  "drift": 1.2},
-    {"freq": 462.575,   "rssi": -78, "band": "UHF-High", "mod": "FM",  "drift": 0.8},
-    {"freq": 155.340,   "rssi": -66, "band": "VHF",      "mod": "FM",  "drift": 0.4},
-    {"freq": 107.9,     "rssi": -50, "band": "FM-Radio", "mod": "FM",  "drift": 0.05},
-]
+@app.route("/api/signals")
+def api_signals():
+    """Query persisted signals from DB."""
+    band   = request.args.get("band")
+    hours  = int(request.args.get("hours", 1))
+    limit  = int(request.args.get("limit", 500))
+    wt_only = request.args.get("wt_only", "false").lower() == "true"
 
-async def simulate_scanner():
-    """Generates fake signal detections every second."""
-    scan_id = 0
-    logging.info("Simulation mode active — generating fake signals")
-    while True:
-        detections = []
-        for tx in SIM_TRANSMITTERS:
-            if tx["band"] not in SCANNER_CONFIG["bands"]:
-                continue
-            if random.random() < 0.07:
-                continue  # signal fades
-            rssi = tx["rssi"] + random.gauss(0, tx["drift"])
-            rssi = round(min(-30, max(-100, rssi)), 1)
-            if rssi > SCANNER_CONFIG["rssi_threshold"]:
-                detections.append({
-                    "device_id":  "sdr-node-01",
-                    "timestamp":  datetime.utcnow().isoformat() + "Z",
-                    "frequency":  round(tx["freq"] + random.gauss(0, 0.001), 5),
-                    "rssi":       rssi,
-                    "band":       tx["band"],
-                    "modulation": tx["mod"],
-                    "active":     True,
-                    "scan_id":    scan_id,
-                })
+    since = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    q = "SELECT * FROM signals WHERE timestamp >= ? "
+    params = [since]
+    if band:
+        q += "AND band = ? "
+        params.append(band)
+    if wt_only:
+        q += "AND is_wt = 1 "
+    q += "ORDER BY timestamp DESC LIMIT ?"
+    params.append(limit)
+    rows = [dict(r) for r in conn.execute(q, params)]
+    conn.close()
+    return jsonify(rows)
 
-        # Occasional burst (walkie-talkie keying up)
-        if "PMR446" in SCANNER_CONFIG["bands"] and random.random() < 0.10:
-            ch = random.choice([446.03125, 446.04375, 446.05625, 446.06875])
-            detections.append({
-                "device_id":  "sdr-node-01",
-                "timestamp":  datetime.utcnow().isoformat() + "Z",
-                "frequency":  ch,
-                "rssi":       round(random.uniform(-80, -60), 1),
-                "band":       "PMR446",
-                "modulation": "FM",
-                "active":     True,
-                "scan_id":    scan_id,
-            })
 
-        if detections:
-            await push_detections(detections)
+@app.route("/api/stats")
+def api_stats():
+    """Aggregate statistics from DB."""
+    conn = sqlite3.connect(DB_PATH)
+    stats = {}
+    stats["total_scans"] = conn.execute("SELECT COUNT(*) FROM scans").fetchone()[0]
+    stats["total_signals"] = conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
+    stats["wt_detections"] = conn.execute(
+        "SELECT COUNT(*) FROM signals WHERE is_wt=1").fetchone()[0]
+    stats["band_breakdown"] = {
+        row[0]: row[1]
+        for row in conn.execute(
+            "SELECT band, COUNT(*) FROM signals WHERE band IS NOT NULL "
+            "GROUP BY band ORDER BY COUNT(*) DESC"
+        )
+    }
+    stats["top_channels"] = [
+        {"freq_mhz": row[0], "count": row[1], "band": row[2]}
+        for row in conn.execute(
+            "SELECT freq_mhz, COUNT(*) as cnt, band FROM signals "
+            "GROUP BY freq_mhz ORDER BY cnt DESC LIMIT 10"
+        )
+    ]
+    conn.close()
+    return jsonify(stats)
 
-        scan_id += 1
-        await asyncio.sleep(SCANNER_CONFIG["scan_interval"])
 
-# ──────────────────────────────────────────────
-# HTTP REST API (simple, no framework needed)
-# ──────────────────────────────────────────────
+@app.route("/api/alerts")
+def api_alerts():
+    return jsonify(ALERT_LOG[-100:])
 
-class APIHandler(BaseHTTPRequestHandler):
-    def log_message(self, format, *args):
-        pass  # suppress default HTTP logs
 
-    def _send_json(self, data, status=200):
-        body = json.dumps(data, indent=2).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(body)
+@app.route("/api/alerts/rules")
+def api_alert_rules():
+    return jsonify(ALERTS)
 
-    def do_OPTIONS(self):
-        self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
-        self.end_headers()
 
-    def do_GET(self):
-        if self.path == "/api/signals":
-            self._send_json({
-                "count":    len(_signal_history),
-                "signals":  list(_signal_history)[-200:],
-            })
-        elif self.path == "/api/stats":
-            self._send_json({
-                "band_stats": _band_stats,
-                "scan_count": _scan_count,
-                "connected_clients": len(_ws_clients),
-                "uptime": time.strftime("%H:%M:%S", time.gmtime(
-                    time.time() - _start_time
-                )),
-            })
-        elif self.path == "/api/config":
-            self._send_json(SCANNER_CONFIG)
-        else:
-            self._send_json({"error": "not found"}, 404)
+@app.route("/api/alerts/rules/<rule_id>", methods=["PATCH"])
+def api_toggle_alert(rule_id):
+    data = request.get_json(force=True)
+    for rule in ALERTS:
+        if rule["id"] == rule_id:
+            if "active" in data:
+                rule["active"] = bool(data["active"])
+            if "threshold_db" in data:
+                rule["threshold_db"] = float(data["threshold_db"])
+            return jsonify(rule)
+    abort(404)
 
-    def do_PUT(self):
-        if self.path == "/api/config":
-            length  = int(self.headers.get("Content-Length", 0))
-            body    = self.rfile.read(length)
-            try:
-                updates = json.loads(body)
-                SCANNER_CONFIG.update(updates)
-                self._send_json({"ok": True, "config": SCANNER_CONFIG})
-                logging.info(f"Config updated via HTTP: {updates}")
-            except json.JSONDecodeError:
-                self._send_json({"error": "invalid JSON"}, 400)
-        else:
-            self._send_json({"error": "not found"}, 404)
 
-def start_http():
-    server = HTTPServer((HTTP_HOST, HTTP_PORT), APIHandler)
-    logging.info(f"REST API listening on http://{HTTP_HOST}:{HTTP_PORT}")
-    server.serve_forever()
+@app.route("/api/export/csv")
+def api_export_csv():
+    """Export signal history as CSV."""
+    from io import StringIO
+    import csv
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT timestamp, freq_mhz, power_db, snr_db, band, channel, "
+        "modulation, is_wt FROM signals ORDER BY timestamp DESC LIMIT 5000"
+    ).fetchall()
+    conn.close()
 
-# ──────────────────────────────────────────────
-# Entry point
-# ──────────────────────────────────────────────
+    buf = StringIO()
+    w = csv.writer(buf)
+    w.writerow(["timestamp", "freq_mhz", "power_db", "snr_db",
+                "band", "channel", "modulation", "is_walkie_talkie"])
+    for r in rows:
+        w.writerow(list(r))
 
-_start_time = time.time()
+    from flask import Response
+    return Response(
+        buf.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=signals.csv"},
+    )
 
-async def main_async(simulate: bool):
-    global _loop
-    _loop = asyncio.get_running_loop()
 
-    tasks = []
+# ─── Serve dashboard ─────────────────────────────────────────────────────────
+@app.route("/")
+def serve_dashboard():
+    dash = os.path.join(BASE_DIR, "..", "dashboard", "index.html")
+    if os.path.exists(dash):
+        return send_from_directory(os.path.dirname(dash), "index.html")
+    return "<h2>Dashboard not found. Place index.html in /dashboard/</h2>", 404
 
-    # WebSocket server
-    ws_server = await websockets.serve(ws_handler, WS_HOST, WS_PORT)
-    logging.info(f"WebSocket server listening on ws://{WS_HOST}:{WS_PORT}")
 
-    if simulate:
-        tasks.append(asyncio.create_task(simulate_scanner()))
-    else:
-        # MQTT bridge runs in a thread (paho is not async)
-        mqtt_thread = Thread(target=start_mqtt, daemon=True)
-        mqtt_thread.start()
+@app.route("/health")
+def health():
+    return "OK", 200
 
-    await asyncio.gather(*tasks, return_exceptions=True)
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--simulate", action="store_true",
-                        help="Generate fake signals (no Pi/MQTT needed)")
-    parser.add_argument("--broker", default=MQTT_BROKER)
-    parser.add_argument("--port",   default=MQTT_PORT, type=int)
-    args = parser.parse_args()
-
-    logging.basicConfig(level=logging.INFO,
-                        format="%(asctime)s [%(levelname)s] %(message)s")
-
-    # HTTP API in background thread
-    http_thread = Thread(target=start_http, daemon=True)
-    http_thread.start()
-
-    try:
-        asyncio.run(main_async(simulate=args.simulate))
-    except KeyboardInterrupt:
-        logging.info("Server stopped")
+# ═══════════════════════════════════════════════════════════════════════════════
+#  STARTUP
+# ═══════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description="IoT RF Signal Server")
+    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--port", type=int, default=5000)
+    parser.add_argument("--debug", action="store_true")
+    args = parser.parse_args()
+
+    init_db()
+    print(f"""
+╔══════════════════════════════════════════════╗
+║       IoT RF Signal Scanner — Server         ║
+║  http://{args.host}:{args.port}              ║
+║  Dashboard → http://localhost:{args.port}/   ║
+╚══════════════════════════════════════════════╝
+    """)
+    socketio.run(app, host=args.host, port=args.port, debug=args.debug)
