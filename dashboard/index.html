@@ -433,6 +433,25 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(
 <body>
 <div id="app">
 
+<!-- GNU Radio live signal panel — paste anywhere visible in <body> -->
+<div id="gnuradio-panel" style="display:flex;align-items:center;gap:12px;
+  padding:4px 12px;border:1px solid var(--border);border-radius:6px;
+  background:var(--bg3);font-family:var(--f-mono);font-size:10px">
+  <span style="color:var(--text2)">GNU Radio</span>
+  <span id="signal-badge" class="badge-inactive">No Signal</span>
+  <span style="color:var(--text2)">PWR:</span>
+  <strong id="power-value" style="color:var(--cyan)">-- dBm</strong>
+  <span style="color:var(--text2)">RMS:</span>
+  <span id="rms-value" style="color:var(--green)">0.0000</span>
+  <span style="color:var(--text2)">Peak:</span>
+  <span id="peak-value" style="color:var(--amber)">0.0000</span>
+</div>
+
+<style>
+  .badge-active   { background:#22d3a0;color:#000;padding:2px 8px;border-radius:10px;font-weight:700; }
+  .badge-inactive { background:#f43f5e;color:#fff;padding:2px 8px;border-radius:10px;font-weight:700; }
+</style>
+
 <!-- TOPBAR -->
 <div id="topbar">
   <div class="brand"><div class="brand-dot"></div><span class="brand-cc">CHEMCHAM</span> IoT</div>
@@ -1713,6 +1732,15 @@ WebRTCManager = class WebRTCManagerPhase2 {
     socket.on('webrtc_ice',    (d) => this.handleIce(d));
     socket.on('peer_tx_start', (d) => this.onPeerTxStart(d));
     socket.on('peer_tx_stop',  (d) => this.onPeerTxStop(d));
+	socket.on("gnuradio_update", (data) => {
+    document.getElementById("power-value").textContent  = data.power_db + " dBm";
+    document.getElementById("rms-value").textContent    = data.rms.toFixed(4);
+    document.getElementById("peak-value").textContent   = data.peak.toFixed(4);
+
+    const badge = document.getElementById("signal-badge");
+    badge.textContent = data.signal_active ? "Signal Active" : "No Signal";
+    badge.className   = data.signal_active ? "badge-active" : "badge-inactive";
+});
   }
 
   async requestMic() {

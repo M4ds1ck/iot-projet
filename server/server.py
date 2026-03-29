@@ -23,6 +23,8 @@ from datetime import datetime, timedelta, timezone
 from io import StringIO
 from pathlib import Path
 from typing import Any
+import numpy as np
+import zmq
 
 import requests
 from flask import Flask, Response, abort, jsonify, request, send_from_directory
@@ -33,6 +35,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "signals.db"
 ALERTS_FILE = BASE_DIR / "alerts.log"
 DASH_DIR = BASE_DIR.parent / "dashboard"
+ZMQ_ADDRESS = os.getenv("ZMQ_ADDRESS", "tcp://127.0.0.1:5555")
 
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "5000"))
@@ -44,6 +47,16 @@ SOCKETIO_ASYNC_MODE = os.getenv(
     "SOCKETIO_ASYNC_MODE",
     "threading" if os.name == "nt" else "eventlet",
 )
+
+# Latest metrics received from GNU Radio via ZMQ
+gnuradio_metrics: dict[str, Any] = {
+    "power_db":      None,
+    "rms":           None,
+    "peak":          None,
+    "signal_active": False,
+    "updated_at":    None,
+}
+gnuradio_lock = threading.RLock()
 
 HEARTBEAT_INTERVAL_SEC = 10
 HEARTBEAT_TIMEOUT_SEC = HEARTBEAT_INTERVAL_SEC * 3
@@ -767,6 +780,55 @@ def stale_client_monitor() -> None:
             if WEBHOOK_URL:
                 fire_webhook(WEBHOOK_URL, {"event": "peer_offline", "peer": peer})
 
+def gnuradio_zmq_listener() -> None:
+    """
+    Background task — subscribes to GNU Radio ZMQ PUB Sink.
+    Receives float32 audio samples, computes metrics,
+    stores them in gnuradio_metrics, and emits 'gnuradio_update'
+    to all connected dashboard clients.
+    """
+    context = zmq.Context()
+    sock = context.socket(zmq.SUB)
+    sock.connect(ZMQ_ADDRESS)
+    sock.setsockopt(zmq.SUBSCRIBE, b"")
+    # Non-blocking poll so eventlet can yield between checks
+    sock.setsockopt(zmq.RCVTIMEO, 100)
+    print(f"[ZMQ] Listening on {ZMQ_ADDRESS}")
+
+    while True:
+        try:
+            raw = sock.recv()
+            samples = np.frombuffer(raw, dtype=np.float32)
+            if len(samples) == 0:
+                continue
+
+            power_linear = float(np.mean(samples ** 2))
+            power_db     = float(10 * np.log10(power_linear + 1e-12))
+            rms          = float(np.sqrt(power_linear))
+            peak         = float(np.max(np.abs(samples)))
+            active       = power_db > -30.0
+
+            payload = {
+                "power_db":      round(power_db, 2),
+                "rms":           round(rms, 4),
+                "peak":          round(peak, 4),
+                "signal_active": active,
+                "updated_at":    utc_now(),
+            }
+
+            with gnuradio_lock:
+                gnuradio_metrics.update(payload)
+
+            # Emit to every browser on the dashboard room
+            socketio.emit("gnuradio_update", payload, room="dashboard")
+
+        except zmq.Again:
+            # Timeout — no data yet, yield to eventlet and loop
+            socketio.sleep(0.05)
+        except Exception as e:
+            print(f"[ZMQ] Error: {e}")
+            socketio.sleep(0.5)
+
 
 def ensure_background_tasks() -> None:
     global _background_tasks_started
@@ -774,7 +836,7 @@ def ensure_background_tasks() -> None:
         return
     _background_tasks_started = True
     socketio.start_background_task(stale_client_monitor)
-
+    socketio.start_background_task(gnuradio_zmq_listener)  # ← ADD THIS LINE
 
 @socketio.on("connect")
 def on_connect() -> None:
@@ -1009,6 +1071,11 @@ def on_ptt_stop(data: dict[str, Any]) -> None:
             db_insert_call_rows(session, ended_at, duration_ms, payload.get("quality"))
     emit("peer_tx_stop", payload, room="field", include_self=False)
 
+@app.route("/api/gnuradio")
+def api_gnuradio() -> Response:
+    """Latest GNU Radio signal metrics — poll this or use the gnuradio_update socket event."""
+    with gnuradio_lock:
+        return jsonify(gnuradio_metrics)
 
 @app.route("/api/status")
 def api_status() -> Response:
